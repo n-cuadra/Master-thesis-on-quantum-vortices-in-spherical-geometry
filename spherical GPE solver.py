@@ -20,7 +20,7 @@ lmax = N//2 - 1 #maximum degree of spherical harmonics
 
 #coordinate system
 
-theta, phi = np.linspace(0,  np.pi, N, endpoint = False), np.linspace(0, 2 * np.pi, 2*N, endpoint= False)  #rectangular grid with polar angle theta and azimuthal angle phi
+theta, phi = np.linspace(0,  np.pi, N, endpoint = False), np.linspace(0, 2 * np.pi, 2 * N, endpoint= False)  #rectangular grid with polar angle theta and azimuthal angle phi
 dangle = np.pi / N  #grid spacing
 
 
@@ -100,7 +100,7 @@ def Laplacian(psi):
 
 #calculate energy of condensate (conserved quantitiy)
 
-def energy(psi):
+def get_energy(psi):
     energy = 0
     Laplace_psi = Laplacian(psi) #array of Laplacian of wavefunction
     deriv_phi_psi = deriv_phi(psi) #array of derivative wrt azimuthal angle of wavefunction
@@ -113,7 +113,7 @@ def energy(psi):
     
 #calculate angular momentum of condensate (another conserved quantity).
 
-def ang_momentum(psi):
+def get_ang_momentum(psi):
     mom = 0
     deriv_phi_psi = deriv_phi(psi) #array of derivative wrt azimuthal angle of wavefunction
     conj_psi = np.conjugate(psi) #array of complex conjugate of wavefunction
@@ -132,20 +132,14 @@ for i in range(N):
         psi[i,j] = density(theta[i], phi[j]) * np.exp(1.0j * phase(theta[i], phi[j]))
         
 norm = get_norm(psi)
-psi  = psi / np.sqrt(norm)
-
-print(get_norm(psi))
-print(energy(psi))    
-print(ang_momentum(psi)) 
+psi  = psi / np.sqrt(norm) #normalize wavefunction
 
 sh_coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #calculate array of initial spherical harmonic expansion coefficients 
-
-
 
 #one timestep with split stepping method
 
 def timestep(sh_coeffs, dt):
-    len_l = np.size(sh_coeffs, axis = 1)  #size of sh_coeffs array in l and m indices
+    len_l = np.size(sh_coeffs, axis = 1)  #size of sh_coeffs array in l and m indices(degree and order)
     for l in range(len_l):
         for m in range(len_l):
             for i in range(2):
@@ -156,28 +150,140 @@ def timestep(sh_coeffs, dt):
     return sh_coeffs
 
 
-
-
-
-for q in range(10000): 
-    sh_coeffs = timestep(sh_coeffs, dt)
-    
-
-data = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False)
-print(get_norm(data))
-print(energy(data))  
-print(ang_momentum(data))     
-data = abs(data)**2
-coeffs = pysh.expand.SHExpandDH(griddh = data, norm = 4, sampling = 2)
+#some stuff needed for plotting
 
 mycmap = cm.seismic
 myprojection = crs.Mollweide(central_longitude=180.)
+gridspec_kw = dict(height_ratios = (1,1), hspace = 0.5)
 
-clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = lmax)
-grid = clm.expand()
-fig, ax = grid.plot(cmap = mycmap, colorbar = 'right',  show = False)
 
-#plt.savefig('J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/10000.pdf', dpi = 300)
+#PLOT INITIAL CONDITION
+#################################################################
+
+psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #get a grid of the wavefunction from the coefficients
+dens = abs(psi)**2 #calculate condensate density
+phase_angle = np.angle(psi) #calculate phase of condensate
+
+norm = get_norm(psi) #calculate norm of condensate
+energy = get_energy(psi) #calculate energy of condensate
+mom = get_ang_momentum(psi) #calculate angular momentum of condensate
+
+dens_coeffs = pysh.expand.SHExpandDH(griddh = dens, norm = 4, sampling = 2) #get sh coefficients for the density
+phase_coeffs = pysh.expand.SHExpandDH(griddh = phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
+
+
+dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the density 
+phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the phase
+
+dens_grid = dens_clm.expand() #create a SHGrid instance for the density 
+phase_grid = phase_clm.expand() #create a SHGrid instance for the phase
+
+#plot
+
+fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw)
+
+#subplot for denstiy
+
+dens_grid.plot(cmap = mycmap, 
+               colorbar = 'right', 
+               cb_label = 'Density', 
+               xlabel = '', 
+               tick_interval = [90,45], 
+               tick_labelsize = 6, 
+               axes_labelsize = 7,
+               ax = axes[0],  
+               show = False)
+
+#subplot for phase
+
+phase_grid.plot(cmap = mycmap, 
+                colorbar = 'right', 
+                cb_label = 'Phase', 
+                tick_interval = [90,45], 
+                tick_labelsize = 6, 
+                axes_labelsize = 7, 
+                ax = axes[1],  
+                show = False)
+
+#put the conserved quantities below the plots
+
+axes[1].text(-1, -150, 'Norm = ' + str(norm), fontsize = 'x-small')
+axes[1].text(-1, -180, 'Energy = ' + str(energy), fontsize = 'x-small')
+axes[1].text(-1, -210, 'Angular momentum = ' + str(mom), fontsize = 'x-small')
+
+plt.suptitle('Initial condition')
+
+filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/First simulation of two vortices/init.pdf'
+
+#plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+
+
+#SIMULATION
+############################################################
+
+end = 10000 #number of steps in simulation
+
+for q in range(1, end + 1): #using range in this way ensures that q has the same value as the current number of steps that have been done for the purpose of plotting below
+    sh_coeffs = timestep(sh_coeffs, dt)
+    if (q % (end / 10) == 0):  #plot 10 times during simulation
+        psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #get a grid of the wavefunction from the coefficients
+        dens = abs(psi)**2 #calculate condensate density
+        phase_angle = np.angle(psi) #calculate phase of condensate
+        
+        norm = get_norm(psi) #calculate norm of condensate
+        energy = get_energy(psi) #calculate energy of condensate
+        mom = get_ang_momentum(psi) #calculate angular momentum of condensate
+
+        dens_coeffs = pysh.expand.SHExpandDH(griddh = dens, norm = 4, sampling = 2) #get sh coefficients for the density
+        phase_coeffs = pysh.expand.SHExpandDH(griddh = phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
+
+
+        dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the density 
+        phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the phase
+
+        dens_grid = dens_clm.expand() #create a SHGrid instance for the density 
+        phase_grid = phase_clm.expand() #create a SHGrid instance for the phase
+
+        #plot
+
+        fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw)
+
+        #subplot for denstiy
+
+        dens_grid.plot(cmap = mycmap, 
+                       colorbar = 'right', 
+                       cb_label = 'Density', 
+                       xlabel = '', 
+                       tick_interval = [90,45], 
+                       tick_labelsize = 6, 
+                       axes_labelsize = 7,
+                       ax = axes[0],  
+                       show = False)
+        
+        #subplot for phase
+
+        phase_grid.plot(cmap = mycmap, 
+                        colorbar = 'right', 
+                        cb_label = 'Phase', 
+                        tick_interval = [90,45], 
+                        tick_labelsize = 6, 
+                        axes_labelsize = 7, 
+                        ax = axes[1],  
+                        show = False)
+        
+        #put the conserved quantities below the plots
+        
+        axes[1].text(-1, -150, 'Norm = ' + str(norm), fontsize = 'x-small')
+        axes[1].text(-1, -180, 'Energy = ' + str(energy), fontsize = 'x-small')
+        axes[1].text(-1, -210, 'Angular momentum = ' + str(mom), fontsize = 'x-small')
+        
+        plt.suptitle('Time evolution of two vortices after ' + str(q) + ' steps')
+        
+        filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/First simulation of two vortices/' + str(q) + 'steps.pdf'
+
+        #plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+
+
 
 
 

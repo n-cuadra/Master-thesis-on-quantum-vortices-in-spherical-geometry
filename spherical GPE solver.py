@@ -129,7 +129,7 @@ def get_ang_momentum(psi):
 psi = np.zeros(shape = (N, 2*N), dtype = np.complex128)
 for i in range(N):
     for j in range(2*N):
-        psi[i,j] = density(theta[i], phi[j]) * np.exp(1.0j * phase(theta[i], phi[j]))
+        psi[i, j] = density(theta[i], phi[j]) * np.exp(1.0j * phase(theta[i], phi[j]))
         
 norm = get_norm(psi)
 psi  = psi / np.sqrt(norm) #normalize wavefunction
@@ -154,13 +154,12 @@ def timestep(sh_coeffs, dt):
 
 mycmap = cm.seismic
 myprojection = crs.Mollweide(central_longitude=180.)
-gridspec_kw = dict(height_ratios = (1,1), hspace = 0.5)
+gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 
 
 #PLOT INITIAL CONDITION
 #################################################################
 
-psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #get a grid of the wavefunction from the coefficients
 dens = abs(psi)**2 #calculate condensate density
 phase_angle = np.angle(psi) #calculate phase of condensate
 
@@ -171,6 +170,7 @@ mom = get_ang_momentum(psi) #calculate angular momentum of condensate
 dens_coeffs = pysh.expand.SHExpandDH(griddh = dens, norm = 4, sampling = 2) #get sh coefficients for the density
 phase_coeffs = pysh.expand.SHExpandDH(griddh = phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
 
+clm = pysh.SHCoeffs.from_array(sh_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum
 
 dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the density 
 phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the phase
@@ -181,6 +181,7 @@ phase_grid = phase_clm.expand() #create a SHGrid instance for the phase
 #plot
 
 fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw)
+plt.suptitle('Initial condition')
 
 #subplot for denstiy
 
@@ -211,11 +212,21 @@ axes[1].text(-1, -150, 'Norm = ' + str(norm), fontsize = 'x-small')
 axes[1].text(-1, -180, 'Energy = ' + str(energy), fontsize = 'x-small')
 axes[1].text(-1, -210, 'Angular momentum = ' + str(mom), fontsize = 'x-small')
 
-plt.suptitle('Initial condition')
-
 filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/First simulation of two vortices/init.pdf'
 
-#plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+
+#plot spectrum
+
+clm.plot_spectrum(unit = 'per_l', show = False)
+plt.title('Spectrum of initial condition')
+
+filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/First simulation of two vortices/spectrum_init.pdf'
+
+plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+
+
+
 
 
 #SIMULATION
@@ -236,8 +247,9 @@ for q in range(1, end + 1): #using range in this way ensures that q has the same
 
         dens_coeffs = pysh.expand.SHExpandDH(griddh = dens, norm = 4, sampling = 2) #get sh coefficients for the density
         phase_coeffs = pysh.expand.SHExpandDH(griddh = phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
-
-
+        
+        clm = pysh.SHCoeffs.from_array(sh_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum (at the bottom)
+        
         dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the density 
         phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the phase
 
@@ -247,6 +259,8 @@ for q in range(1, end + 1): #using range in this way ensures that q has the same
         #plot
 
         fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw)
+        
+        plt.suptitle('Time evolution of two vortices after ' + str(q) + ' steps')
 
         #subplot for denstiy
 
@@ -277,11 +291,21 @@ for q in range(1, end + 1): #using range in this way ensures that q has the same
         axes[1].text(-1, -180, 'Energy = ' + str(energy), fontsize = 'x-small')
         axes[1].text(-1, -210, 'Angular momentum = ' + str(mom), fontsize = 'x-small')
         
-        plt.suptitle('Time evolution of two vortices after ' + str(q) + ' steps')
-        
         filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/First simulation of two vortices/' + str(q) + 'steps.pdf'
 
-        #plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+        plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+        
+        #plot spectrum
+        
+        clm.plot_spectrum(unit = 'per_l', show = False)
+        
+        plt.title('Spectrum after ' + str(q) + ' steps')
+
+        filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/First simulation of two vortices/spectrum_' + str(q) + 'steps.pdf'
+
+        plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+        
+     
 
 
 

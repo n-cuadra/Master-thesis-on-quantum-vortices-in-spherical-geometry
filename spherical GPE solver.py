@@ -129,25 +129,37 @@ def get_ang_momentum(psi):
 psi = np.zeros(shape = (N, 2*N), dtype = np.complex128)
 for i in range(N):
     for j in range(2*N):
-        psi[i, j] = density(theta[i], phi[j]) * np.exp(1.0j * phase(theta[i], phi[j]))
+        psi[i, j] = np.sqrt(density(theta[i], phi[j])) * np.exp(1.0j * phase(theta[i], phi[j]))
         
-norm = get_norm(psi)
-psi  = psi / np.sqrt(norm) #normalize wavefunction
 
-sh_coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #calculate array of initial spherical harmonic expansion coefficients 
+coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #calculate array of initial spherical harmonic expansion coefficients 
 
 #one timestep with split stepping method
 
-def timestep(sh_coeffs, dt):
-    len_l = np.size(sh_coeffs, axis = 1)  #size of sh_coeffs array in l and m indices(degree and order)
+def timestep_coeffs(coeffs, dt):
+    len_l = np.size(coeffs, axis = 1)  #size of sh_coeffs array in l and m indices(degree and order)
     for l in range(len_l):
         for m in range(len_l):
             for i in range(2):
-                sh_coeffs[i,l,m] *= np.exp(- 1.0j * alpha * l * (l + 1) * dt / 2) * np.exp(- 1.0j * m * dt * (-1.)**i)  #timestep of kinetic and rotating term
-    grid = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
-    grid *= np.exp(1.0j * g * dt * abs(grid)**2) #timestep of nonlinear term
-    sh_coeffs = pysh.expand.SHExpandDHC(griddh = grid, norm = 4, sampling = 2) #calculate expansion coefficients from the gridded data
-    return sh_coeffs
+                coeffs[i,l,m] *= np.exp(- 1.0j * alpha * l * (l + 1) * dt / 2) * np.exp(- 1.0j * m * dt * (-1.)**i)  #timestep of kinetic and rotating term
+    psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
+    psi *= np.exp(1.0j * g * dt * abs(psi)**2) #timestep of nonlinear term
+    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #calculate expansion coefficients from the gridded data
+    return coeffs
+
+#the same timestep as above, except the input and output is the gridded data, i.e. the wavefunction
+
+def timestep_grid(psi, dt):
+    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
+    len_l = np.size(coeffs, axis = 1)  #size of sh_coeffs array in l and m indices(degree and order)
+    for l in range(len_l):
+        for m in range(len_l):
+            for i in range(2):
+                coeffs[i,l,m] *= np.exp(- 1.0j * alpha * l * (l + 1) * dt / 2) * np.exp(- 1.0j * m * dt * (-1.)**i)  #timestep of kinetic and rotating term
+    psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
+    psi *= np.exp(1.0j * g * dt * abs(psi)**2) #timestep of nonlinear term
+    
+    return psi
 
 
 #some stuff needed for plotting
@@ -157,87 +169,18 @@ myprojection = crs.Mollweide(central_longitude=180.)
 gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 
 
-#PLOT INITIAL CONDITION
-#################################################################
-
-dens = abs(psi)**2 #calculate condensate density
-phase_angle = np.angle(psi) #calculate phase of condensate
-
-norm = get_norm(psi) #calculate norm of condensate
-energy = get_energy(psi) #calculate energy of condensate
-mom = get_ang_momentum(psi) #calculate angular momentum of condensate
-
-dens_coeffs = pysh.expand.SHExpandDH(griddh = dens, norm = 4, sampling = 2) #get sh coefficients for the density
-phase_coeffs = pysh.expand.SHExpandDH(griddh = phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
-
-clm = pysh.SHCoeffs.from_array(sh_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum
-
-dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the density 
-phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the phase
-
-dens_grid = dens_clm.expand() #create a SHGrid instance for the density 
-phase_grid = phase_clm.expand() #create a SHGrid instance for the phase
-
-#plot
-
-fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw)
-plt.suptitle('Initial condition')
-
-#subplot for denstiy
-
-dens_grid.plot(cmap = mycmap, 
-               colorbar = 'right', 
-               cb_label = 'Density', 
-               xlabel = '', 
-               tick_interval = [90,45], 
-               tick_labelsize = 6, 
-               axes_labelsize = 7,
-               ax = axes[0],  
-               show = False)
-
-#subplot for phase
-
-phase_grid.plot(cmap = mycmap, 
-                colorbar = 'right', 
-                cb_label = 'Phase', 
-                tick_interval = [90,45], 
-                tick_labelsize = 6, 
-                axes_labelsize = 7, 
-                ax = axes[1],  
-                show = False)
-
-#put the conserved quantities below the plots
-
-axes[1].text(-1, -150, 'Norm = ' + str(norm), fontsize = 'x-small')
-axes[1].text(-1, -180, 'Energy = ' + str(energy), fontsize = 'x-small')
-axes[1].text(-1, -210, 'Angular momentum = ' + str(mom), fontsize = 'x-small')
-
-filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/First simulation of two vortices/init.pdf'
-
-plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
-
-#plot spectrum
-
-clm.plot_spectrum(unit = 'per_l', show = False)
-plt.title('Spectrum of initial condition')
-
-filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/First simulation of two vortices/spectrum_init.pdf'
-
-plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
-
-
-
 
 
 #SIMULATION
 ############################################################
 
+#after the if statement follows the plotting routine to give a plot of the density and phase of the wave function and a 
+
 end = 10000 #number of steps in simulation
 
-for q in range(1, end + 1): #using range in this way ensures that q has the same value as the current number of steps that have been done for the purpose of plotting below
-    sh_coeffs = timestep(sh_coeffs, dt)
+for q in range(end + 1): #using range in this way ensures that q has the same value as the current number of steps that have been done for the purpose of plotting below
     if (q % (end / 10) == 0):  #plot 10 times during simulation
-        psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #get a grid of the wavefunction from the coefficients
+        
         dens = abs(psi)**2 #calculate condensate density
         phase_angle = np.angle(psi) #calculate phase of condensate
         
@@ -248,7 +191,8 @@ for q in range(1, end + 1): #using range in this way ensures that q has the same
         dens_coeffs = pysh.expand.SHExpandDH(griddh = dens, norm = 4, sampling = 2) #get sh coefficients for the density
         phase_coeffs = pysh.expand.SHExpandDH(griddh = phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
         
-        clm = pysh.SHCoeffs.from_array(sh_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum (at the bottom)
+        coeffs = pysh.expand.SHExpandDH(griddh = psi, norm = 4, sampling = 2)
+        clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum (at the bottom)
         
         dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the density 
         phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = lmax) #create a SHCoeffs instance from the coefficient array for the phase
@@ -304,7 +248,10 @@ for q in range(1, end + 1): #using range in this way ensures that q has the same
         filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/First simulation of two vortices/spectrum_' + str(q) + 'steps.pdf'
 
         plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
-        
+    
+    
+    psi = timestep_grid(psi, dt)
+
      
 
 

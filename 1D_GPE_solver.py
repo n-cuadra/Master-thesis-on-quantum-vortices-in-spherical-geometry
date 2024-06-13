@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
+from matplotlib import cm
 
 
 
@@ -11,20 +12,22 @@ import matplotlib.animation as animation
 
 L = 10.0                              #length of lattice
 N = 1024                           #number of lattice points
-x = np.linspace(0, L, N, endpoint=False)              #lattice
-dx = L / N                    #lattice spacing   
-dt = 1e-5                            #timestep
-sigma = 1./12.                             #gaussian width
-k = 2 * np.pi * np.fft.fftfreq(N, d  = dx) / L    #lattice in fourier space, positive k first, then negative k
-g = 5.0                            #nonlinear coefficient
-v = 0.3 #soliton velocity
+x = np.linspace(-L/2, L/2, N)              #lattice
+dx = x[1] - x[0]                    #lattice spacing   
+dt = 1e-4                           #timestep
+sigma = 1./3.                             #gaussian width
+k = 2 * np.pi * np.fft.fftfreq(N - 1, d  = dx)    #lattice in fourier space, positive k first, then negative k
+g = 1.0                            #nonlinear coefficient
+v = 0.5 #soliton velocity
+width = 0.4 #soliton width
+epsilon = 1e-4  #strength of bogoliubov excitation
 
     
 #function to compute norm
 
 def get_norm(psi):
     norm = 0
-    for i in range(len(psi)):
+    for i in range(len(psi) - 1):
         norm += dx * np.abs(psi[i])**2
     return norm
 
@@ -34,8 +37,8 @@ def second_deriv(psi):
     secondderiv = np.zeros(N, dtype=np.complex128)
     for i in range(1, N - 1):
         secondderiv[i] = (psi[i+1] + psi[i-1] - 2. * psi[i]) / (dx * dx)
-    secondderiv[0]  = (psi[1] + psi[-1] - 2. * psi[0]) / (dx * dx)  
-    secondderiv[-1] = (psi[0] + psi[-2] - 2. * psi[-1]) / (dx * dx)   
+    secondderiv[0]  = (psi[1] + psi[-2] - 2. * psi[0]) / (dx * dx)#the first point on the grid is next to the second last one
+    secondderiv[-1] = secondderiv[0] #the last point on the grid is the same as the first one
     return secondderiv
 
 #function to compute energy
@@ -44,7 +47,7 @@ def get_energy(psi):
     energy = 0
     secondderiv = second_deriv(psi)
     psi_conj = np.conjugate(psi)
-    for i in range(N):
+    for i in range(len(psi) - 1):
         energy += dx * (- psi_conj[i] * secondderiv[i] / 2 + g * np.abs(psi[i])**4)
     energy = np.real(energy)
     return energy
@@ -58,10 +61,14 @@ def gaussian(x, x_0, sigma):
 #function to initialize condensate as dark soliton
 
 def dark_soliton(x, x0, v):
-    dark_sol = 1.0j * v + np.sqrt(1 - v**2) * np.tanh( (x - x0)  * np.sqrt(1 - v**2) )
+    dark_sol = 1.0j * v + np.sqrt(1 - v**2) * np.tanh( (x - x0)  * np.sqrt(1 - v**2))
     return dark_sol
 
+#define bogoliubov type exciations on a uniform density
+#this is to test whether the code accurately reproduces the known bogoliubov dispersion
 
+def bog_exc(x, k, epsilon):
+    return 1 + epsilon * ( np.exp(1.0j * k * x) + np.exp(-1.0j * k * x) )
 
 #initalize wave function 
 
@@ -70,33 +77,26 @@ psi = np.zeros(N, dtype = np.complex128)
 
 for i in range(N):
     #psi[i] = gaussian(x[i], x[0] + L/2, sigma) #gaussian
-    psi[i] = dark_soliton(x[i], L/2,  v) 
+    psi[i] = dark_soliton(x[i], -L/4.,  v) * dark_soliton(x[i], L/4., -v) #two dark solitons
+    #psi[i] = bog_exc(x[i], k_ord, epsilon) #bogoliubov excitations
     
 
 
-norm = get_norm(psi)
-
-psi = psi/np.sqrt(norm)
 
 
 
-
-#split stepping
+#timestep with split stepping
 
 def split_step(psi, dt):
-    psi = np.fft.fft(psi) #go to fourier space
-    
-    psi *= np.exp(-1.0j * k**2 * dt * 0.5)  #perform kinetic step there
-    
-    psi = np.fft.ifft(psi) #back to real space
-    
+    psi = psi[:-1] #cut off the last point which is the first point
+    psi_k = np.fft.fft(psi) #go to fourier space
+    psi_k *= np.exp(-1.0j * k**2 * dt * 0.5)  #perform kinetic step there
+    psi = np.fft.ifft(psi_k) #back to real space
+    psi = np.append(psi, psi[0]) #append the first value at the end again
     psi *= np.exp(1.0j * g * np.abs(psi)**2 * dt) #perform nonlinear step here
-    
-    psi[-1] = psi[0]
-    
     return psi
 
-#timestep with Runge Kutta 4
+#timestep with Runge Kutta 4 
 
 def rk4_step(psi, dt):
     k1 = 1.0j * 0.5 * second_deriv(psi) - 1.0j * g * np.abs(psi)**2 * psi
@@ -110,27 +110,42 @@ def rk4_step(psi, dt):
 
 
 #run simulation
+'''
+end = 10000
+psi_x_t = np.zeros((end//10, N), dtype = np.complex128) #initialize array in which the wavefunction as a function of x AND t will be stored
 
+for i in range(end):
+    #if (i % 10 == 0): #every 10 timesteps append the time evolution to the array
+        #ind = i // 10
+        #psi_x_t[ind, :] = psi
+    psi = rk4_step(psi, dt)
+   
 
-#for i in range(10000):
-    #psi = rk4_step(psi, dt)
-    
-#plot final function
+'''
+
+#plot function
+
+print(psi[0], psi[-1])
     
 energy = get_energy(psi)
 norm = get_norm(psi)
 
-textxpos = x[0] + 0.05
-textypos = ( (np.abs(psi)**2).max() - (np.abs(psi)**2).min() ) / 10
+helperpos = (np.abs(psi).max())**2 - (np.abs(psi).min())**2
+ylimmin = (np.abs(psi).min())**2 - helperpos / 20.
+ylimmax = (np.abs(psi).max())**2 + helperpos / 20
+
+textstr = '\n'.join((r'$g = $' + str(g), r'$v = $' + str(v)))
+props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
 
 
 fig, ax = plt.subplots()
 line, = ax.plot(x, np.abs(psi)**2)
-steptext = ax.text(textxpos, -1.5 * textypos, 'Integration step: 0')
-energytext = ax.text(textxpos ,  -2.5 * textypos , 'Energy: ' + str(energy))
-normtext = ax.text(textxpos ,  -3.5 * textypos , 'Norm: ' + str(norm))
+ax.text(0.05, 0.5, textstr, fontsize=8, transform = ax.transAxes, bbox=props)
+steptext = ax.text(0.05, -0.15, 'Integration step: 0', transform = ax.transAxes,)
+energytext = ax.text(0.05,  -0.25, 'Energy: ' + str(energy), transform = ax.transAxes,)
+normtext = ax.text(0.05,  -0.35 , 'Norm: ' + str(norm), transform = ax.transAxes,)
 plt.xlim(x[0],x[-1])
-plt.ylim((np.abs(psi).min())**2, (np.abs(psi).max())**2)
+plt.ylim(ylimmin, ylimmax)
 plt.xlabel(r'x')
 plt.ylabel(r'$|\Psi|^2$')
 plt.tight_layout()
@@ -164,7 +179,7 @@ ani = animation.FuncAnimation(fig, animate, np.arange(1, 1000), init_func=init, 
 
  
 #FFwriter=animation.FFMpegWriter(fps=60, extra_args=['-vcodec', 'libx264'])
-ani.save('J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/1D_GPE_split_stepping_solitons.mp4',  dpi = 300)
+ani.save('J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/1D_GPE_rk4_solitons.mp4',  dpi = 300)
 
 
 plt.show()

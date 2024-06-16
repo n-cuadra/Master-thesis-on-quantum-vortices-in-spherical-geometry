@@ -9,7 +9,7 @@ from matplotlib import cm
 #parameters
 N = 512 #grid points
 R = 1.0 #radius of sphere
-theta_plus = np.pi/5 #position of vortex on the upper hemisphere
+theta_plus = np.pi / 40 #position of vortex on the upper hemisphere
 dt = 1.e-4  #time step
 omega = 2 * np.pi * 5 #frequency in Hz
 real_dt = dt * 1000 / omega #length of one timestep in real time in ms
@@ -128,20 +128,8 @@ def get_ang_momentum(psi):
     return mom
 
 
-#one timestep with split stepping method where the sh coefficients are the input and output
+#one timestep with split stepping method where the gridded data (i.e. the wave function) is the input and output
 
-def timestep_coeffs(coeffs, dt):
-    len_l = np.size(coeffs, axis = 1)  #size of sh_coeffs array in l and m indices(degree and order)
-    for l in range(len_l):
-        for m in range(len_l):
-            for i in range(2):
-                coeffs[i,l,m] *= np.exp(- 1.0j * alpha * l * (l + 1) * dt / 2) * np.exp(- 1.0j * m * dt * (-1.)**i)  #timestep of kinetic and rotating term
-    psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
-    psi *= np.exp(-1.0j * g * dt * np.abs(psi)**2) #timestep of nonlinear term
-    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #calculate expansion coefficients from the gridded data
-    return coeffs
-
-#the same timestep as above, except the input and output is the gridded data, i.e. the wavefunction
 
 def timestep_grid(psi, dt):
     coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
@@ -149,9 +137,12 @@ def timestep_grid(psi, dt):
     for l in range(len_l):
         for m in range(len_l):
             for i in range(2):
-                coeffs[i,l,m] *= np.exp(- 1.0j * alpha * l * (l + 1) * dt / 2) * np.exp(- 1.0j * m * dt * (-1.)**i)  #timestep of kinetic and rotating term
+                coeffs[i,l,m] *= np.exp(-alpha * l * (l + 1) * dt / 2) * np.exp(-m * dt * (-1.)**i)  #timestep of kinetic and rotating term
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
-    psi *= np.exp(-1.0j * g * dt * np.abs(psi)**2) #timestep of nonlinear term
+    psi *= np.exp(-g * dt * np.abs(psi)**2) #timestep of nonlinear term
+    
+    norm = get_norm(psi)
+    psi = psi/np.sqrt(norm) #normalize wavefunction, important to do in every step for imaginary time evolution
     return psi
 
 
@@ -161,9 +152,11 @@ psi = np.zeros(shape = (N, 2*N), dtype = np.complex128)
 
 for i in range(N):
     for j in range(2*N):
-        psi[i,j] = 10 * np.sqrt(gauss_density(theta[i], phi[j], sigma)) * np.exp(1.0j * phase(theta[i], phi[j])) #initalize psi with the upside down gaussian density
-        #psi[i,j] = bog_exc(l, m, theta[i], phi[j], epsilon) #initialize psi as a bogoliubov excitation
-
+        psi[i,j] = np.sqrt(gauss_density(theta[i], phi[j], sigma)) * np.exp(1.0j * phase(theta[i], phi[j])) #initalize psi with the upside down gaussian density
+        
+norm = get_norm(psi)
+psi = psi/np.sqrt(norm)
+        
 
 #some stuff needed for plotting
 
@@ -207,7 +200,7 @@ for q in range(end + 1):
 
         fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw)
         
-        plt.suptitle('Time evolution of two vortices after ' + str(time) + 'ms')
+        plt.suptitle('Imaginary time evolution of two vortices after ' + str(time) + 'ms')
 
         #subplot for denstiy
 
@@ -271,14 +264,5 @@ for q in range(end + 1):
 
         plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
         plt.show()
-    psi = timestep_grid(psi, dt)
-
-    
-
-
-
-
-
-
-
-
+    psi = timestep_grid(psi, dt)        
+        

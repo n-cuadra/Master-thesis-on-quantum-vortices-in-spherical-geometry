@@ -5,19 +5,40 @@ import pyshtools as pysh
 from cartopy import crs
 from matplotlib import cm
 
+#set some parameters for plotting
 
-#parameters
+plt.rc('font', family='sans-serif')
+plt.rc('xtick', labelsize='x-small')
+plt.rc('ytick', labelsize='x-small')
+plt.rcParams['mathtext.fontset'] = 'cm'
+
+#constants
+bohr_radius = 5.2918e-5 #bohr radius in micrometers
+hbar = 1.055e-22 #hbar in units of kg * µm^2 / s
+
+
+#simulation parameters (adjustable)
 N = 512 #grid points
-R = 1.0 #radius of sphere
-theta_plus = np.pi / 40 #position of vortex on the upper hemisphere
-dt = 1.e-4  #time step
-omega = 2 * np.pi * 5 #frequency in Hz
-real_dt = dt * 1000 / omega #length of one timestep in real time in ms
-alpha = 5 / omega # linear coefficient
-g = -1. / omega   #nonlinear coefficient
+R = 50.0 #radius of sphere in µm
+mass = 1.443e-25 #mass of the atoms in kg
+scattering_length = 100.0 #scattering length in units of the Bohr radius
+omega_units = 5.0 #rotating frequency in Hz
+theta_plus = 0.0 #position of vortex on the upper hemisphere
+dt = 1.0e-4  #time step
 bg_dens = 1. #condensate density far from vortices
+xi = 0.05 #healing length
+
+#these are calculated from the values above, don't change these!
+
 lmax = N//2 - 1 #maximum degree of spherical harmonics
-sigma = 1./24. #width of gaussian
+g = - np.pi / np.log(np.sqrt(lmax * (lmax + 1)) * scattering_length * bohr_radius * np.exp(np.euler_gamma) / (2 * R) ) #unitless interaction strength
+real_dt = 1000 * dt *  R**2 * mass / hbar #one timestep in real time in ms
+omega = omega_units * R**2 * mass / hbar #unitless rotating frequency
+
+#coordinate system
+
+theta, phi = np.linspace(0,  np.pi, N, endpoint = False), np.linspace(0, 2 * np.pi, 2 * N, endpoint = False)  #rectangular grid with polar angle theta and azimuthal angle phi
+dangle = np.pi / N  #grid spacing
 
 
 #coordinate system
@@ -35,16 +56,17 @@ def cot(x):
 
 #transformation from spherical to cartesian coordinates
 
-def sph2cart(theta, phi):
-    x = R * np.sin(theta) * np.cos(phi)
-    y = R * np.sin(theta) * np.sin(phi)
-    z = R * np.cos(theta)
+def sph2cart(theta, phi, r):
+    x = r * np.sin(theta) * np.cos(phi)
+    y = r * np.sin(theta) * np.sin(phi)
+    z = r * np.cos(theta)
     return x, y, z
 
 #transformation from cartesian to spherical coordinates
 
 def cart2sph(x, y, z):
-    theta = np.arccos(z/R)
+    r = np.sqrt(x^2 + y^2 + z^2)
+    theta = np.arccos(z/r)
     phi = np.arctan2(x,y)
     return theta, phi
 
@@ -71,7 +93,7 @@ def gauss_density(theta, phi, sigma):
     return density
 
     
-#define norm function
+#define norm function, this calculates particle number of the condensate
 
 def get_norm(psi):
     norm = 0
@@ -111,11 +133,11 @@ def get_energy(psi):
     conj_psi = np.conjugate(psi) #array of complex conjugate of wavefunction
     for i in range(N):
         for j in range(2*N):
-            energy += dangle**2 * np.sin(theta[i]) * (  - alpha / 2 * conj_psi[i,j] * Laplace_psi[i,j] + g * np.abs(psi[i,j])**4 - 1.0j * conj_psi[i,j] * deriv_phi_psi[i,j]  ) #compute the hamiltonian
+            energy += dangle**2 * np.sin(theta[i]) * (  - 0.5 * conj_psi[i,j] * Laplace_psi[i,j] + g * np.abs(psi[i,j])**4 - 1.0j * omega * conj_psi[i,j] * deriv_phi_psi[i,j]  ) #compute the hamiltonian
     energy = np.real(energy)
     return energy
     
-#calculate angular momentum of condensate (another conserved quantity).
+#calculate angular momentum of condensate in z direction (another conserved quantity).
 
 def get_ang_momentum(psi):
     mom = 0
@@ -127,9 +149,7 @@ def get_ang_momentum(psi):
     mom = np.real(mom)
     return mom
 
-
-#one timestep with split stepping method where the gridded data (i.e. the wave function) is the input and output
-
+#one timestep in imaginary time with input and output as gridded data
 
 def timestep_grid(psi, dt):
     coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
@@ -137,12 +157,12 @@ def timestep_grid(psi, dt):
     for l in range(len_l):
         for m in range(len_l):
             for i in range(2):
-                coeffs[i,l,m] *= np.exp(-alpha * l * (l + 1) * dt / 2) * np.exp(-m * dt * (-1.)**i)  #timestep of kinetic and rotating term
+                coeffs[i,l,m] *= np.exp(- 0.5 * l * (l + 1) * dt ) * np.exp(- m * omega * dt * (-1.)**i)  #timestep of kinetic and rotating term
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
-    psi *= np.exp(-g * dt * np.abs(psi)**2) #timestep of nonlinear term
+    psi *= np.exp(- g * dt * np.abs(psi)**2) #timestep of nonlinear term
     
     norm = get_norm(psi)
-    psi = psi/np.sqrt(norm) #normalize wavefunction, important to do in every step for imaginary time evolution
+    psi = psi/np.sqrt(norm) #normalize on every time step is important for imaginary time evolution
     return psi
 
 
@@ -152,11 +172,11 @@ psi = np.zeros(shape = (N, 2*N), dtype = np.complex128)
 
 for i in range(N):
     for j in range(2*N):
-        psi[i,j] = np.sqrt(gauss_density(theta[i], phi[j], sigma)) * np.exp(1.0j * phase(theta[i], phi[j])) #initalize psi with the upside down gaussian density
+        psi[i,j] = np.sqrt(gauss_density(theta[i], phi[j], xi)) * np.exp(1.0j * phase(theta[i], phi[j])) #initalize psi with the upside down gaussian density with the healing length as the width
         
 norm = get_norm(psi)
-psi = psi/np.sqrt(norm)
-        
+psi = psi / np.sqrt(norm)
+
 
 #some stuff needed for plotting
 
@@ -173,9 +193,12 @@ gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 
 end = 10000 #number of steps in simulation
 
+t = np.zeros(end//10, dtype = np.float64) #initialize array of passed time in the simulation
+energy_t = np.zeros(end//10, dtype = np.float64) #initialize array of energy as a function of time
+
 for q in range(end + 1): 
     if (q % (end / 10) == 0):  #plot 10 times during simulation
-        time = round(dt * q * 1000 / omega, 2) #real time that has passed at this point in the simulation in ms
+        time = round(real_dt * q, 2) #real time that has passed at this point in the simulation in ms
         
         
         dens = np.abs(psi)**2 #calculate condensate density
@@ -198,7 +221,7 @@ for q in range(end + 1):
 
         #plot
 
-        fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw)
+        fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw, figsize = (10, 6))
         
         plt.suptitle('Imaginary time evolution of two vortices after ' + str(time) + 'ms')
 
@@ -238,17 +261,17 @@ for q in range(end + 1):
         
         #these lines put a textbox with some simulation parameters into the density plot
         
-        angle_frac = int(np.pi/theta_plus)
+        #angle_frac = int(np.pi/theta_plus)
         
-        textstr ='\n'.join((r'$\omega=%.1f$' % (omega, ) + 'Hz', r'$\theta_+ = \pi/$' + str(angle_frac), r'$\Delta t =%.3f$' % (real_dt, ) + 'ms'))
+        textstr ='\n'.join((r'$\omega=%.1f$' % (omega_units, ) + 'Hz', r'$\theta_+ = 0$' , r'$\Delta t =%.3f$' % (real_dt, ) + 'ms', r'$g = %.3f$' % (g, ) + r'$\hbar^2/m$'))
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        axes[0].text(10, 80, textstr, fontsize=4, verticalalignment='top', bbox=props)
+        axes[0].text(10, 80, textstr, fontsize=7, verticalalignment='top', bbox=props)
         
         #put the conserved quantities below the plots
         
-        axes[1].text(-1, -150, 'Norm = ' + str(norm), fontsize = 'x-small')
-        axes[1].text(-1, -180, 'Energy = ' + str(energy), fontsize = 'x-small')
-        axes[1].text(-1, -210, 'Angular momentum = ' + str(mom), fontsize = 'x-small')
+        #axes[1].text(-1, -150, 'Norm = ' + str(norm), fontsize = 'x-small')
+        #axes[1].text(-1, -180, 'Energy = ' + str(energy), fontsize = 'x-small')
+        #axes[1].text(-1, -210, 'Angular momentum = ' + str(mom), fontsize = 'x-small')
         
         filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/Simulations of two vortices/' + str(time) + 'ms.pdf'
 
@@ -264,5 +287,20 @@ for q in range(end + 1):
 
         plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
         plt.show()
-    psi = timestep_grid(psi, dt)        
-        
+    if (q % 10 == 0): #do this every 10 steps
+        index = q // 10
+        t[index] = real_dt * q
+        energy_t[index] = get_energy(psi)
+    psi = timestep_grid(psi, dt)
+    if (q % 100 == 0):
+        print(q)
+
+
+#plot the energy as a function of time
+
+plt.plot(t, energy_t)
+plt.xlabel('Energy')
+plt.ylabel('Time in ms')
+filename = 'J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/Simulations of two vortices/energy.pdf'
+plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+

@@ -134,19 +134,20 @@ for q in range(params.end + 1):
     if (q % 10 == 0): #do this every 10 steps
         index = q // 10
         t[index] = params.real_dt * q
-        energy_t[index] = sgpe.get_energy(psi, params.g, params.omega) * 1.924e-19
+        ekin, eint, erot = sgpe.get_energy(psi, params.g, params.omega)
+        energy_t[index] = ekin + eint + erot
     psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, params.omega, particle_number)
 
 header = 'bg_dens = ' + str(params.bg_dens) + ', theta+ = %.7f' % (params.theta_plus, ) + ', phi+ = %.7f' % (params.phi_plus, ) + ', theta- = %.7f' % (params.theta_minus, ) + ', phi- = %.7f' % (params.phi_minus, )
-np.savetxt('initial condition2.txt', psi, delimiter = ',', header = header)
+np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Initial conditions/initial condition4.txt', psi, delimiter = ',', header = header)
 
 #%%
 #plot the energy as a function of time
 
 plt.plot(t, energy_t)
-plt.ylabel(r'$E$ [eV]')
+plt.ylabel(r'$E_{\text{tot}}$ $\left[ \frac{\hbar^2}{m R^2}  \right]$')
 plt.xlabel(r'$t$ [ms]')
 filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/energy.pdf'
-plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+#plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
 
 

@@ -16,12 +16,13 @@ plt.rcParams['mathtext.fontset'] = 'cm'
 
 #initialize wavefunction
 
-psi = np.loadtxt('initial condition.txt', comments = '#', delimiter = ',', dtype = np.complex128)
+psi = np.loadtxt('J:/Uni - Physik/Master/Masterarbeit/Data/Initial conditions/initial condition2.txt', comments = '#', delimiter = ',', dtype = np.complex128)
 
 
 #some stuff needed for plotting
 
-mycmap = cm.seismic
+density_cmap = cm.plasma
+phase_cmap = cm.twilight
 myprojection = crs.Mollweide(central_longitude=180.)
 gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 
@@ -36,14 +37,14 @@ particle_number_t = np.zeros(params.end//10 + 1, dtype = np.float64) #initialize
 energy_t = np.zeros(params.end//10 + 1, dtype = np.float64) #initialize array of energy as a function of time
 angular_momentum_t = np.zeros(params.end//10 + 1, dtype = np.float64) #initialize array of angular momentum as a function of time
 
-plot_number = 10 #number of times you would like to plot and track vortices during the simulation
+plot_number = 15 #number of times you would like to plot and track vortices during the simulation
 
 #initialize arrays for vortex tracking
 t_tracker = np.zeros(plot_number + 1, dtype = np.float64)
 theta_tracker_plus = np.zeros(plot_number + 1, dtype = np.float64)
 theta_tracker_minus = np.zeros(plot_number + 1, dtype = np.float64)
 
-vortex_tracking = True #True if you want to track vortex position 
+vortex_tracking = False #True if you want to track vortex position 
 conserved_tracking = False #True if you want to record conserved quantities
 
 for q in range(params.end + 1): 
@@ -86,7 +87,7 @@ for q in range(params.end + 1):
 
         #subplot for denstiy
 
-        dens_grid.plot(cmap = mycmap, 
+        dens_grid.plot(cmap = density_cmap, 
                        colorbar = 'right', 
                        cb_label = 'Density', 
                        xlabel = '', 
@@ -102,7 +103,7 @@ for q in range(params.end + 1):
         
         #subplot for phase
 
-        phase_grid.plot(cmap = mycmap, 
+        phase_grid.plot(cmap = phase_cmap, 
                         colorbar = 'right',
                         cb_label = 'Phase',
                         tick_interval = [90,45], 
@@ -126,7 +127,7 @@ for q in range(params.end + 1):
         
         filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/' + str(time) + 'ms.pdf'
 
-        plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+        #plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
         
         #plot spectrum
         
@@ -136,7 +137,7 @@ for q in range(params.end + 1):
 
         filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/spectrum_' + str(time) + 'ms.pdf'
 
-        plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+        #plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
         plt.show()
         
         #vortex tracking
@@ -173,15 +174,18 @@ for q in range(params.end + 1):
 
 #%%
 
-plt.plot(t_tracker, theta_tracker_plus, label = r'$\theta_+$', marker = 'x', linestyle = 'None', mew = 0.7)
-plt.plot(t_tracker, theta_tracker_minus, label = r'$\theta_-$', marker = 'x', linestyle = 'None', mew = 0.7)
-plt.yticks(ticks = (0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi), labels = (0, r'$\pi/4$', r'$\pi/2$', r'$3\pi/4$', r'$\pi$'))
-plt.ylim(0, np.pi)
+print(theta_tracker_plus)
+print(theta_tracker_minus)
+
+#plt.plot(t_tracker[0:6], theta_tracker_plus[0:6], label = r'$\theta_+$', marker = 'x', linestyle = 'None', mew = 0.7)
+plt.plot(t_tracker[0:6], theta_tracker_minus[0:6], label = r'$\theta_-$', marker = 'x', linestyle = 'None', mew = 0.7)
+#plt.yticks(ticks = (0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi), labels = (0, r'$\pi/4$', r'$\pi/2$', r'$3\pi/4$', r'$\pi$'))
+#plt.ylim(0, np.pi)
 plt.gca().invert_yaxis()
 plt.xlabel(r'$t$ [ms]')
 plt.ylabel(r'$\theta$')
 plt.legend()
-filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/vortex tracking1.pdf'
+filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/vortex tracking3.pdf'
 plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
 
 

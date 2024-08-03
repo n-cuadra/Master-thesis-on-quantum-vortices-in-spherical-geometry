@@ -111,10 +111,8 @@ def generate_gridded_wavefunction(theta_plus, phi_plus, theta_minus, phi_minus, 
 
 
 def get_norm(psi):
-    norm = 0
-    for i in range(params.N):
-        for j in range(2*params.N):
-            norm += np.sin(params.theta[i]) * params.dangle**2 * np.abs(psi[i,j])**2
+    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #sh coefficients of wavefunction
+    norm = np.sum(np.abs(coeffs)**2) #sum over the absolute value squared of all coefficients
     return norm
 
 
@@ -143,27 +141,30 @@ def Laplacian(psi):
 #calculate energy of condensate (conserved quantitiy)
 
 def get_energy(psi, g, omega):
-    energy = 0
-    Laplace_psi = Laplacian(psi) #array of Laplacian of wavefunction
-    deriv_phi_psi = deriv_phi(psi) #array of derivative wrt azimuthal angle of wavefunction
-    conj_psi = np.conjugate(psi) #array of complex conjugate of wavefunction
-    for i in range(params.N):
-        for j in range(2*params.N):
-            energy += params.dangle**2 * np.sin(params.theta[i]) * (  - 0.5 * conj_psi[i,j] * Laplace_psi[i,j] + g * np.abs(psi[i,j])**4 - 1.0j * omega * conj_psi[i,j] * deriv_phi_psi[i,j]  ) #compute the hamiltonian
-    energy = np.real(energy)
-    return energy
+    psi4 = np.abs(psi)**4
+    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
+    coeffs4 = pysh.expand.SHExpandDH(griddh = psi4, norm = 4, sampling = 2)
+    
+    ekin = 0
+    erot = 0
+    eint = np.sqrt(4 * np.pi) * 0.5 * g * coeffs4[0, 0, 0]
+    
+    for l in range(params.lmax + 1):
+        for m in range(l + 1):
+            ekin += 0.5 * l * (l + 1) * (np.abs(coeffs[0, l, m])**2 + np.abs(coeffs[1, l, m])**2)
+            erot += omega * m * (np.abs(coeffs[0, l, m])**2 - np.abs(coeffs[1, l, m])**2)
+    
+    return ekin, eint, erot
     
 #calculate angular momentum of condensate in z direction (another conserved quantity).
 
 
 def get_ang_momentum(psi):
     mom = 0
-    deriv_phi_psi = deriv_phi(psi) #array of derivative wrt azimuthal angle of wavefunction
-    conj_psi = np.conjugate(psi) #array of complex conjugate of wavefunction
-    for i in range(params.N):
-        for j in range(2*params.N):
-            mom += - 1.0j * params.dangle**2 * np.sin(params.theta[i]) * conj_psi[i,j] * deriv_phi_psi[i,j] #compute the angular momentum integral
-    mom = np.real(mom)
+    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
+    for l in range(params.lmax + 1):
+        for m in range(l + 1):
+            mom += m * (np.abs(coeffs[0, l, m])**2 - np.abs(coeffs[1, l, m])**2)
     return mom
 
 
@@ -190,7 +191,7 @@ def timestep_grid(psi, dt, g, omega):
     for l in range(len_l):
         for m in range(len_l):
             for i in range(2):
-                coeffs[i,l,m] *= np.exp(- 1.0j * 0.5 * l * (l + 1) * dt ) * np.exp(- 1.0j * m * omega * dt * (-1.)**i)  #timestep of kinetic and rotating term
+                coeffs[i, l, m] *= np.exp(- 1.0j * 0.5 * l * (l + 1) * dt ) * np.exp(- 1.0j * m * omega * dt * (-1.)**i)  #timestep of kinetic and rotating term
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     psi *= np.exp(-1.0j * g * dt * np.abs(psi)**2) #timestep of nonlinear term
     return psi

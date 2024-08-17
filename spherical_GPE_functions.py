@@ -1,6 +1,9 @@
 import numpy as np
 import pyshtools as pysh
+import matplotlib.colors as col
+import hsluv
 import spherical_GPE_params as params
+
 
 
 #cotangent
@@ -30,10 +33,10 @@ def cart2sph(x, y, z):
 
 
 def phase(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus):
-    num1 = cot(theta/2) * np.sin(phi) - cot(theta_plus/2) * np.sin(phi_plus)
-    denom1 = cot(theta/2) * np.cos(phi) - cot(theta_plus/2) * np.cos(phi_plus)
-    num2 = cot(theta/2) * np.sin(phi) - cot(theta_minus/2) * np.sin(phi_minus)
-    denom2 = cot(theta/2) * np.cos(phi) - cot(theta_minus/2) * np.cos(phi_minus)
+    denom1 = cot(theta/2) * np.sin(phi) - cot(theta_plus/2) * np.sin(phi_plus)
+    num1 = cot(theta/2) * np.cos(phi) - cot(theta_plus/2) * np.cos(phi_plus)
+    denom2= cot(theta/2) * np.sin(phi) - cot(theta_minus/2) * np.sin(phi_minus)
+    num2 = cot(theta/2) * np.cos(phi) - cot(theta_minus/2) * np.cos(phi_minus)
     
     phase = np.arctan2(num1, denom1) - np.arctan2(num2, denom2)
     return phase
@@ -111,7 +114,7 @@ def generate_gridded_wavefunction(theta_plus, phi_plus, theta_minus, phi_minus, 
 
 
 def get_norm(psi):
-    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #sh coefficients of wavefunction
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #sh coefficients of wavefunction
     norm = np.sum(np.abs(coeffs)**2) #sum over the absolute value squared of all coefficients
     return norm
 
@@ -120,7 +123,7 @@ def get_norm(psi):
 
 
 def deriv_phi(psi):
-    sh_coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #expand sh coefficients of psi
+    sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
     len_m = np.size(sh_coeffs, axis = 2) 
     for m in range(len_m):
         for i in range(2):
@@ -131,7 +134,7 @@ def deriv_phi(psi):
 #define angular Laplacian
 
 def Laplacian(psi):
-    sh_coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #expand sh coefficients of psi
+    sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
     len_l = np.size(sh_coeffs, axis = 1) 
     for l in range(len_l):
         sh_coeffs[:,l,:] *= - l * (l + 1) #spherical harmonics are eigenfunctions of angular Laplacian, so need only to multiply coefficients with -l(l+1) to perform Laplacian
@@ -140,32 +143,39 @@ def Laplacian(psi):
 
 #calculate energy of condensate (conserved quantitiy)
 
+
 def get_energy(psi, g, omega):
-    psi4 = np.abs(psi)**4
-    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
-    coeffs4 = pysh.expand.SHExpandDH(griddh = psi4, norm = 4, sampling = 2)
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
+    coeffs2 = pysh.expand.SHExpandDH(np.abs(psi)**2, norm = 4, sampling = 2)
     
-    ekin = 0
-    erot = 0
-    eint = np.sqrt(4 * np.pi) * 0.5 * g * coeffs4[0, 0, 0]
+    def kinetic(i, l, m):
+        return 0.5 * l * (l + 1) 
+    def rotation(i, l, m):
+        return omega * m * (-1.)**i
     
-    for l in range(params.lmax + 1):
-        for m in range(l + 1):
-            ekin += 0.5 * l * (l + 1) * (np.abs(coeffs[0, l, m])**2 + np.abs(coeffs[1, l, m])**2)
-            erot += omega * m * (np.abs(coeffs[0, l, m])**2 - np.abs(coeffs[1, l, m])**2)
+    kinetic_multiplier = np.fromfunction(kinetic, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
+    rotation_multiplier = np.fromfunction(rotation, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)    
+    
+    ekin = np.sum(kinetic_multiplier * np.abs(coeffs)**2)
+    erot = np.sum(rotation_multiplier * np.abs(coeffs)**2)
+    eint = np.sum(0.5 * g * coeffs2**2)
     
     return ekin, eint, erot
-    
+
+
 #calculate angular momentum of condensate in z direction (another conserved quantity).
 
-
 def get_ang_momentum(psi):
-    mom = 0
-    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
-    for l in range(params.lmax + 1):
-        for m in range(l + 1):
-            mom += m * (np.abs(coeffs[0, l, m])**2 - np.abs(coeffs[1, l, m])**2)
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
+    
+    def angmom(i, l, m):
+        return m * (-1)**i
+    
+    mom_multiplier = np.fromfunction(angmom, shape = np.shape(coeffs), dtype = np.float64)
+    mom = np.sum(mom_multiplier * np.abs(coeffs)**2)
+    
     return mom
+
 
 
 #one timestep with split stepping method where the sh coefficients are the input and output
@@ -179,26 +189,45 @@ def timestep_coeffs(coeffs, dt, g, omega):
                 coeffs[i,l,m] *= np.exp(- 1.0j * 0.5 * l * (l + 1) * dt ) * np.exp(- 1.0j * m * omega * dt * (-1.)**i)  #timestep of kinetic and rotating term
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     psi *= np.exp(-1.0j * g * dt * np.abs(psi)**2) #timestep of nonlinear term
-    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #calculate expansion coefficients from the gridded data
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #calculate expansion coefficients from the gridded data
     return coeffs
 
 #the same timestep as above, except the input and output is the gridded data, i.e. the wavefunction
 
-
 def timestep_grid(psi, dt, g, omega):
-    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
-    len_l = np.size(coeffs, axis = 1)  #size of sh_coeffs array in l and m indices(degree and order)
-    for l in range(len_l):
-        for m in range(len_l):
-            for i in range(2):
-                coeffs[i, l, m] *= np.exp(- 1.0j * 0.5 * l * (l + 1) * dt ) * np.exp(- 1.0j * m * omega * dt * (-1.)**i)  #timestep of kinetic and rotating term
+    psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
+    
+    def step(i, l, m): #this function will be mutiplied entry wise with coeffs with entry indices i, l, m
+        return np.exp(- 1.0j * 0.5 * l * (l + 1) * params.dt ) * np.exp(- 1.0j * m * params.omega * params.dt * (-1.)**i)
+    
+    step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.complex128) #create array of same shape as coeffs with entries from step
+    coeffs = coeffs * step_multiplier
+    
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
-    psi *= np.exp(-1.0j * g * dt * np.abs(psi)**2) #timestep of nonlinear term
+    psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
     return psi
 
 #the same timestep, but for imaginary time
 
 def imaginary_timestep_grid(psi, dt, g, omega, particle_number):
+    #phase = np.angle(psi)
+    psi = psi * np.exp(- 0.5 * g * dt * np.abs(psi)**2) #half timestep of nonlinear term
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
+    
+    def step(i, l, m):#this function will be mutiplied entry wise with coeffs with entry indices i, l, m
+        return np.exp(- 0.5 * l * (l + 1) * dt ) * np.exp(- m * omega * dt * (-1.)**i)
+    
+    step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.float64)
+    coeffs = coeffs * step_multiplier
+    
+    psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
+    psi = psi * np.exp(- 0.5 * g * dt * np.abs(psi)**2) #half timestep of nonlinear term
+    norm = get_norm(psi)
+    psi = np.sqrt(particle_number) * psi / np.sqrt(norm)
+    return psi
+
+def imaginary_timestep_grid2(psi, dt, g, omega, particle_number):
     coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
     len_l = np.size(coeffs, axis = 1)  #size of sh_coeffs array in l and m indices(degree and order)
     for l in range(len_l):
@@ -214,105 +243,38 @@ def imaginary_timestep_grid(psi, dt, g, omega, particle_number):
 
 #vortex tracker
 
-
-def decomissioned_vortex_tracker(psi, theta_guess, phi_guess):
-    
-    Jacobian = np.zeros((2,2), dtype = np.float64) # initialize jacobian
-    
-    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #expand sh coefficients from wave function psi
-    
-    psi_guess = 0 #calculate the wave function psi at position (theta_guess, phi_guess)
-    for l in range(params.lmax + 1):
-        for m in range(l + 1):
-            psi_guess += coeffs[0, l, m] * pysh.expand.spharm_lm(l = l, m = m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)
-            psi_guess += coeffs[1, l, m] * pysh.expand.spharm_lm(l = l, m = -m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)
-    
-    print('density = ', np.abs(psi_guess)**2)                
-    
-    if (np.abs(psi_guess)**2 > 0.01 * np.max(np.abs(psi)**2)): #if density at guessed position is larger than 1% of maximum, possibly cannot guarantee convergence, so the tracking must be aborted
-        print('Guessed position too far away from vortex core. Try again!')
-        return 0, 0
-    
-    machine_epsilon = np.finfo(np.float64).eps #machine epsilon of numpy float 64
-    if (np.abs(psi_guess)**2 < machine_epsilon * np.max(np.abs(psi)**2)): #if the density at the guessed position is smaller than the machine precision fraction of the maximum density assume a reasonably converged solution and return the guess
-        return theta_guess, phi_guess
-    
-    psi_phi = 0 #calculate the derivative of the wave function wrt phi at position (theta_guess, phi_guess)
-    for l in range(params.lmax + 1):
-        for m in range(l + 1):
-            psi_phi += 1.0j * m * coeffs[0, l, m] * pysh.expand.spharm_lm(l = l, m = m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)   
-            psi_phi += - 1.0j * m * coeffs[1, l, m] * pysh.expand.spharm_lm(l = l, m = -m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)
-            
-    
-    print('psi_phi=', psi_phi)
-    Jacobian[0,1] = np.real(psi_phi)/np.sin(theta_guess)
-    Jacobian[1,1] = np.imag(psi_phi)/np.sin(theta_guess)
-    
-    psi_theta = 0 #calculate the derivative of the wave function wrt theta at position (theta_guess, phi_guess)
-    for l in range(params.lmax + 1):
-        for m in range(l + 1):
-            psi_theta += coeffs[0, l, m] * m * cot(theta_guess) * pysh.expand.spharm_lm(l = l, m = m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)
-            psi_theta += coeffs[1, l, m] * m * cot(theta_guess) * pysh.expand.spharm_lm(l = l, m = -m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)
-            if (m < l):
-                psi_theta += coeffs[0, l, m] * np.sqrt((l - m) * (l + m + 1)) * np.exp(- 1.0j * phi_guess) * pysh.expand.spharm_lm(l = l, m = m + 1, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)
-                psi_theta += - coeffs[1, l, m] * np.sqrt((l - m) * (l + m + 1)) * np.exp(1.0j * phi_guess) * pysh.expand.spharm_lm(l = l, m = - m - 1, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)
-    
-    print('psi_theta=', psi_theta)
-    Jacobian[0,0] = np.real(psi_theta)
-    Jacobian[1,0] = np.imag(psi_theta)
-    inverse_jacobian = np.linalg.inv(Jacobian)
-    
-    theta_new = theta_guess - inverse_jacobian[0, 0] * np.real(psi_guess) - inverse_jacobian[0, 1] * np.imag(psi_guess)
-    phi_new = phi_guess - inverse_jacobian[1, 0] * np.real(psi_guess) - inverse_jacobian[1, 1] * np.imag(psi_guess)
-    print(theta_new, phi_new)
-    
-    return vortex_tracker(psi, theta_new, phi_new) #recur the function with the new coordinates as the new guesses
-
-
-
 def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     #expand sh coefficients of wave function, its real part and imaginary part
-    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) 
-    coeffs_real = pysh.expand.SHExpandDH(griddh = np.real(psi), norm = 4, sampling = 2) 
-    coeffs_imag = pysh.expand.SHExpandDH(griddh = np.imag(psi), norm = 4, sampling = 2) 
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) 
+    coeffs_real = pysh.expand.SHExpandDH(np.real(psi), norm = 4, sampling = 2) 
+    coeffs_imag = pysh.expand.SHExpandDH(np.imag(psi), norm = 4, sampling = 2) 
     
     #calculate gradient of real and imaginary part
     psi_theta_real, psi_phi_real = pysh.expand.MakeGradientDH(coeffs_real, sampling = 2) 
     psi_theta_imag, psi_phi_imag = pysh.expand.MakeGradientDH(coeffs_imag, sampling = 2)
     
     #expand sh coefficients for both components of the gradient for real and imaginary part
-    coeffs_theta_real = pysh.expand.SHExpandDH(griddh = psi_theta_real, norm = 4, sampling = 2)
-    coeffs_theta_imag = pysh.expand.SHExpandDH(griddh = psi_theta_imag, norm = 4, sampling = 2)
-    coeffs_phi_real = pysh.expand.SHExpandDH(griddh = psi_phi_real, norm = 4, sampling = 2)
-    coeffs_phi_imag = pysh.expand.SHExpandDH(griddh = psi_phi_imag, norm = 4, sampling = 2)
+    coeffs_theta_real = pysh.expand.SHExpandDH(psi_theta_real, norm = 4, sampling = 2)
+    coeffs_theta_imag = pysh.expand.SHExpandDH(psi_theta_imag, norm = 4, sampling = 2)
+    coeffs_phi_real = pysh.expand.SHExpandDH(psi_phi_real, norm = 4, sampling = 2)
+    coeffs_phi_imag = pysh.expand.SHExpandDH(psi_phi_imag, norm = 4, sampling = 2)
     
     Jacobian = np.zeros((2,2), dtype = np.float64) # initialize jacobian
-    psi_guess = 0 + 0j
     
     #calculate the wave function and the Jacobian at position (theta_guess, phi_guess) in sh representation
-    for l in range(params.lmax + 1):
-        for m in range(l + 1):
-            psi_guess += coeffs[0, l, m] * pysh.expand.spharm_lm(l = l, m = m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)
-            psi_guess += coeffs[1, l, m] * pysh.expand.spharm_lm(l = l, m = -m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'complex', degrees = False)
-            
-            Jacobian[0, 0] += coeffs_theta_real[0, l, m] * pysh.expand.spharm_lm(l = l, m = m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'real', degrees = False)
-            Jacobian[0, 0] += coeffs_theta_real[1, l, m] * pysh.expand.spharm_lm(l = l, m = - m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'real', degrees = False)
-            
-            Jacobian[0, 1] += coeffs_phi_real[0, l, m] * pysh.expand.spharm_lm(l = l, m = m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'real', degrees = False)
-            Jacobian[0, 1] += coeffs_phi_real[1, l, m] * pysh.expand.spharm_lm(l = l, m = - m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'real', degrees = False)
-            
-            Jacobian[1, 0] += coeffs_theta_imag[0, l, m] * pysh.expand.spharm_lm(l = l, m = m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'real', degrees = False)
-            Jacobian[1, 0] += coeffs_theta_imag[1, l, m] * pysh.expand.spharm_lm(l = l, m = - m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'real', degrees = False)
-            
-            Jacobian[1, 1] += coeffs_phi_imag[0, l, m] * pysh.expand.spharm_lm(l = l, m = m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'real', degrees = False)
-            Jacobian[1, 1] += coeffs_phi_imag[1, l, m] * pysh.expand.spharm_lm(l = l, m = - m, theta = theta_guess, phi = phi_guess, normalization = 'ortho', kind = 'real', degrees = False) 
+    psi_guess = np.sum(coeffs * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'complex', degrees = False))
+    Jacobian[0, 0] = np.sum(coeffs_theta_real * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
+    Jacobian[0, 1] = np.sum(coeffs_phi_real * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
+    Jacobian[1, 0] = np.sum(coeffs_theta_imag * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
+    Jacobian[1, 1] = np.sum(coeffs_phi_imag * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
     
-    if (np.abs(psi_guess)**2 > 0.01 * np.max(np.abs(psi)**2)): #if density at guessed position is larger than 1% of maximum, possibly cannot guarantee convergence, so the tracking must be aborted
+    if (np.abs(psi_guess)**2 > 0.05 * np.max(np.abs(psi)**2)): #if density at guessed position is larger than 5% of maximum, possibly cannot guarantee convergence, so the tracking must be aborted
         print('Guessed position too far away from vortex core. Try again!')
+        print('It took ' + str(counter) + ' iterations to arrive here')
         return 0, 0
     
-    if (np.abs(psi_guess)**2 < 1e-6 * np.max(np.abs(psi)**2)): #if the density at the guessed position is smaller than 1e-10 assume a reasonably converged solution and return the guess
-        print('Number of steps to convergence: ' + str(counter))
+    if (np.abs(psi_guess)**2 < 1e-7 * np.max(np.abs(psi)**2)): #if the density at the guessed position is smaller than 1e-10 assume a reasonably converged solution and return the guess
+        print('Number of iterations to convergence: ' + str(counter))
         return theta_guess, phi_guess
     
     inverse_jacobian = np.linalg.inv(Jacobian)
@@ -321,7 +283,30 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     theta_new = theta_guess - inverse_jacobian[0, 0] * np.real(psi_guess) - inverse_jacobian[0, 1] * np.imag(psi_guess)
     phi_new = phi_guess - inverse_jacobian[1, 0] * np.real(psi_guess) - inverse_jacobian[1, 1] * np.imag(psi_guess)
     
+    
     return vortex_tracker(psi, theta_new, phi_new, counter + 1) #recur the function with the new coordinates as the new guesses
+
+#custom cyclic colormap to visualize the phase of the condensate
+
+def phasemap(N = 256, use_hpl = True):
+    h = np.ones(N) # hue
+    h[:N//2] = 11.6 # red 
+    h[N//2:] = 258.6 # blue
+    s = 100 # saturation
+    l = np.linspace(0, 100, N//2) # luminosity
+    l = np.hstack( (l,l[::-1] ) )
+
+    colorlist = np.zeros((N,3))
+    for ii in range(N):
+        if use_hpl:
+            colorlist[ii,:] = hsluv.hpluv_to_rgb((h[ii], s, l[ii]))
+        else:
+            colorlist[ii,:] = hsluv.hsluv_to_rgb((h[ii], s, l[ii]))
+    colorlist[colorlist > 1] = 1 # correct numeric errors
+    colorlist[colorlist < 0] = 0 
+    return col.ListedColormap(colorlist)
+
+
     
     
     

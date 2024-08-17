@@ -134,12 +134,12 @@ for q in range(params.end + 1):
     if (q % 10 == 0): #do this every 10 steps
         index = q // 10
         t[index] = params.real_dt * q
-        ekin, eint, erot = sgpe.get_energy(psi, params.g, params.omega)
+        ekin, eint, erot = sgpe.get_energy(psi, params.g, 0.0)
         energy_t[index] = ekin + eint + erot
-    psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, params.omega, particle_number)
+    psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number)
 
-header = 'bg_dens = ' + str(params.bg_dens) + ', theta+ = %.7f' % (params.theta_plus, ) + ', phi+ = %.7f' % (params.phi_plus, ) + ', theta- = %.7f' % (params.theta_minus, ) + ', phi- = %.7f' % (params.phi_minus, )
-np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Initial conditions/initial condition4.txt', psi, delimiter = ',', header = header)
+#header = 'bg_dens = ' + str(params.bg_dens) + ', theta+ = %.7f' % (params.theta_plus, ) + ', phi+ = %.7f' % (params.phi_plus, ) + ', theta- = %.7f' % (params.theta_minus, ) + ', phi- = %.7f' % (params.phi_minus, )
+#np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Initial conditions/initial condition4.txt', psi, delimiter = ',', header = header)
 
 #%%
 #plot the energy as a function of time

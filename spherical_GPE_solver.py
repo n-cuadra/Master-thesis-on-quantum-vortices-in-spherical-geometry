@@ -16,13 +16,19 @@ plt.rcParams['mathtext.fontset'] = 'cm'
 
 #initialize wavefunction
 
-psi = np.loadtxt('J:/Uni - Physik/Master/Masterarbeit/Data/Initial conditions/initial condition2.txt', comments = '#', delimiter = ',', dtype = np.complex128)
+psi  = sgpe.generate_gridded_wavefunction(params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus, params.xi, params.bg_dens)
+particle_number = sgpe.get_norm(psi)
+
+for _ in range(500):
+    psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number)
+
+#psi = np.loadtxt('J:/Uni - Physik/Master/Masterarbeit/Data/Initial conditions/initial condition2.txt', delimiter = ',', dtype = np.complex128)
 
 
 #some stuff needed for plotting
 
 density_cmap = cm.plasma
-phase_cmap = cm.twilight
+phase_cmap = sgpe.phasemap(use_hpl = False)
 myprojection = crs.Mollweide(central_longitude=180.)
 gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 
@@ -31,21 +37,22 @@ gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 
 #after the first if statement follows the plotting routine to give a plot of the density and phase of the wave function and a plot of the spectrum
 
+conservative_number = 500 #number of times you would like to record conserved quantities
 
-t = np.zeros(params.end//10 + 1, dtype = np.float64) #initialize array of passed time in the simulation
-particle_number_t = np.zeros(params.end//10 + 1, dtype = np.float64) #initialize array of particle number as a function of time
-energy_t = np.zeros(params.end//10 + 1, dtype = np.float64) #initialize array of energy as a function of time
-angular_momentum_t = np.zeros(params.end//10 + 1, dtype = np.float64) #initialize array of angular momentum as a function of time
+t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of passed time in the simulation
+particle_number_t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of particle number as a function of time
+energy_t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of energy as a function of time
+angular_momentum_t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of angular momentum as a function of time
 
-plot_number = 15 #number of times you would like to plot and track vortices during the simulation
+plot_number = 10 #number of times you would like to plot and track vortices during the simulation
 
 #initialize arrays for vortex tracking
 t_tracker = np.zeros(plot_number + 1, dtype = np.float64)
-theta_tracker_plus = np.zeros(plot_number + 1, dtype = np.float64)
-theta_tracker_minus = np.zeros(plot_number + 1, dtype = np.float64)
+vortex_tracker = np.zeros((2, plot_number + 1), dtype = np.float64)
 
-vortex_tracking = False #True if you want to track vortex position 
-conserved_tracking = False #True if you want to record conserved quantities
+
+vortex_tracking = True #True if you want to track vortex position 
+conserved_tracking = True #True if you want to record conserved quantities
 
 for q in range(params.end + 1): 
     if (q % (params.end // plot_number) == 0):  #plot plot_number times during simulation
@@ -54,9 +61,9 @@ for q in range(params.end + 1):
         dens = np.abs(psi)**2 #calculate condensate density
         phase_angle = np.angle(psi) #calculate phase of condensate
         
-        coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2) #get sh coefficients for the wave function     
-        dens_coeffs = pysh.expand.SHExpandDH(griddh = dens, norm = 4, sampling = 2) #get sh coefficients for the density
-        phase_coeffs = pysh.expand.SHExpandDH(griddh = phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
+        coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #get sh coefficients for the wave function     
+        dens_coeffs = pysh.expand.SHExpandDH(dens, norm = 4, sampling = 2) #get sh coefficients for the density
+        phase_coeffs = pysh.expand.SHExpandDH(phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
         
         clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum (at the bottom)
         dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance from the coefficient array for the density 
@@ -125,7 +132,7 @@ for q in range(params.end + 1):
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
         axes[0].text(10, 80, textstr, fontsize=7, verticalalignment='top', bbox=props)
         
-        filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/' + str(time) + 'ms.pdf'
+        filename = './' + str(time) + 'ms.pdf'
 
         #plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
         
@@ -135,7 +142,7 @@ for q in range(params.end + 1):
         
         plt.title('Spectrum after ' + str(time) + 'ms')
 
-        filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/spectrum_' + str(time) + 'ms.pdf'
+        filename = './spectrum' + str(time) + 'ms.pdf'
 
         #plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
         plt.show()
@@ -158,27 +165,36 @@ for q in range(params.end + 1):
             #record the tracked coordinates
             index = q // (params.end // plot_number)
             t_tracker[index] = params.real_dt * q
-            theta_tracker_plus[index] = theta_v_plus
-            theta_tracker_minus[index] = theta_v_minus
+            vortex_tracker[0, index] = theta_v_plus
+            vortex_tracker[1, index] = theta_v_minus
         
     if conserved_tracking:
-        if (q % 10 == 0): #every 10 steps record the time, particle number, energy and angular momentum in the arrays initialized above (to plot the conserved quantities as function of time below)
-            index = q // 10
+        if (q % (params.end // conservative_number) == 0): #every conservative_number steps record the time, particle number, energy and angular momentum in the arrays initialized above (to plot the conserved quantities as function of time below)
+            index = q // conservative_number
             t[index] = params.real_dt * q
             particle_number_t[index] = sgpe.get_norm(psi)
-            energy_t[index] = sgpe.get_energy(psi, params.g, params.omega) 
+            ekin, eint, erot = sgpe.get_energy(psi, params.g, params.omega) 
+            energy_t[index] = ekin + eint + erot
             angular_momentum_t[index] = sgpe.get_ang_momentum(psi)
     
-    psi = sgpe.timestep_grid(psi, params.dt, params.g, params.omega)
+    psi = sgpe.timestep_grid2(psi, params.dt, params.g, params.omega)
 
+#np.savetxt('./vortex_tracker.txt', vortex_tracker, delimiter = ',')
+#np.savetxt('./t_tracker.txt', t_tracker, delimiter = ',')
+#np.savetxt('./t.txt', t, delimiter = ',')
+#np.savetxt('./etot.txt', energy_t, delimiter = ',')
+#np.savetxt('./particle_number.txt', particle_number_t, delimiter = ',')
+#np.savetxt('./angular_momentum.txt', angular_momentum_t, delimiter = ',')
 
 #%%
 
-print(theta_tracker_plus)
-print(theta_tracker_minus)
+print(vortex_tracker)
 
-#plt.plot(t_tracker[0:6], theta_tracker_plus[0:6], label = r'$\theta_+$', marker = 'x', linestyle = 'None', mew = 0.7)
-plt.plot(t_tracker[0:6], theta_tracker_minus[0:6], label = r'$\theta_-$', marker = 'x', linestyle = 'None', mew = 0.7)
+t_tracker2 = np.delete(t_tracker, 2)
+vortex_tracker2 = np.delete(vortex_tracker, 2, axis = 1)
+
+plt.plot(t_tracker2, vortex_tracker2[0], label = r'$\theta_+$', marker = 'x', linestyle = 'None', mew = 0.7)
+#plt.plot(t_tracker2, vortex_tracker2[1], label = r'$\theta_-$', marker = '.', linestyle = 'None', mew = 0.7)
 #plt.yticks(ticks = (0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi), labels = (0, r'$\pi/4$', r'$\pi/2$', r'$3\pi/4$', r'$\pi$'))
 #plt.ylim(0, np.pi)
 plt.gca().invert_yaxis()
@@ -186,32 +202,30 @@ plt.xlabel(r'$t$ [ms]')
 plt.ylabel(r'$\theta$')
 plt.legend()
 filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/vortex tracking3.pdf'
-plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+#plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
 
 
 #%%
 #plot the conserved quantities as a function of time
 
-energy_t *= 1.924e-19 #energy in eV
-elimhelper = np.max(energy_t) - np.min(energy_t)
+
 
 plt.plot(t, energy_t)
 plt.ylabel(r'$E$ [eV]')
 plt.xlabel(r'$t$ [ms]')
-plt.ylim(np.min(energy_t) - elimhelper/10, np.max(energy_t) + elimhelper/10)
+#plt.ylim(np.min(energy_t) - elimhelper/10, np.max(energy_t) + elimhelper/10)
 filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/energy.pdf'
-plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+#plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
 
 
 #%%
-nlimhelper = np.max(particle_number_t) - np.min(particle_number_t)
+
 
 plt.plot(t, particle_number_t)
 plt.ylabel(r'$N$')
 plt.xlabel(r'$t$ [ms]')
-plt.ylim(np.min(particle_number_t) - nlimhelper/10, np.max(particle_number_t) + nlimhelper/10 )
 filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/particle number.pdf'
-plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+#plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
 
 
 #%%
@@ -221,7 +235,9 @@ plt.plot(t, angular_momentum_t)
 plt.ylabel(r'$L_z$ [$\hbar$]')
 plt.xlabel(r'$t$ [ms]')
 filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/angular momentum.pdf'
-plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+#plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+
+
 
 
 

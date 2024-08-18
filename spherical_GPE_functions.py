@@ -1,7 +1,6 @@
 import numpy as np
 import pyshtools as pysh
 import matplotlib.colors as col
-import hsluv
 import spherical_GPE_params as params
 
 
@@ -45,24 +44,7 @@ def phase(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus):
 #define a model initial magnitude of the wavefunction (a function that goes from 0 to 1 over the length scale of the healing length xi at the position of the vortices)
 
 
-def initial_magnitude_1(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus, xi):
-    x = np.sin(theta) * np.cos(phi)
-    x_plus = np.sin(theta_plus) * np.cos(phi_plus)
-    x_minus = np.sin(theta_minus) * np.cos(phi_minus)
-    y = np.sin(theta) * np.sin(phi)
-    y_plus = np.sin(theta_plus) * np.sin(phi_plus)
-    y_minus = np.sin(theta_minus) * np.sin(phi_minus)
-    z = np.cos(theta)
-    z_plus = np.cos(theta_plus)
-    z_minus = np.cos(theta_minus)
-    
-    exp1 = np.exp(- ((x - x_plus)**2 + (y - y_plus)**2 + (z - z_plus)**2) / xi**2)
-    exp2 = np.exp(- ((x - x_minus)**2 + (y - y_minus)**2 + (z - z_minus)**2) / xi**2)
-    
-    return 1. - exp1 - exp2
-
-
-def initial_magnitude_2(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus, xi):
+def initial_magnitude(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus, xi):
     
     x = np.sin(theta) * np.cos(phi)
     x_plus = np.sin(theta_plus) * np.cos(phi_plus)
@@ -182,13 +164,14 @@ def get_ang_momentum(psi):
 
 
 def timestep_coeffs(coeffs, dt, g, omega):
-    len_l = np.size(coeffs, axis = 1)  #size of sh_coeffs array in l and m indices(degree and order)
-    for l in range(len_l):
-        for m in range(len_l):
-            for i in range(2):
-                coeffs[i,l,m] *= np.exp(- 1.0j * 0.5 * l * (l + 1) * dt ) * np.exp(- 1.0j * m * omega * dt * (-1.)**i)  #timestep of kinetic and rotating term
+    def step(i, l, m): #this function will be mutiplied entry wise with coeffs with entry indices i, l, m
+        return np.exp(- 1.0j * 0.5 * l * (l + 1) * params.dt ) * np.exp(- 1.0j * m * params.omega * params.dt * (-1.)**i)
+    
+    step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.complex128) #create array of same shape as coeffs with entries from step
+    coeffs = coeffs * step_multiplier
+    
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
-    psi *= np.exp(-1.0j * g * dt * np.abs(psi)**2) #timestep of nonlinear term
+    psi = psi * np.exp(-1.0j * g * dt * np.abs(psi)**2) #timestep of nonlinear term
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #calculate expansion coefficients from the gridded data
     return coeffs
 
@@ -204,6 +187,7 @@ def timestep_grid(psi, dt, g, omega):
     step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.complex128) #create array of same shape as coeffs with entries from step
     coeffs = coeffs * step_multiplier
     
+    
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
     return psi
@@ -211,7 +195,7 @@ def timestep_grid(psi, dt, g, omega):
 #the same timestep, but for imaginary time
 
 def imaginary_timestep_grid(psi, dt, g, omega, particle_number):
-    #phase = np.angle(psi)
+    phase = np.angle(psi)
     psi = psi * np.exp(- 0.5 * g * dt * np.abs(psi)**2) #half timestep of nonlinear term
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     
@@ -224,7 +208,7 @@ def imaginary_timestep_grid(psi, dt, g, omega, particle_number):
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     psi = psi * np.exp(- 0.5 * g * dt * np.abs(psi)**2) #half timestep of nonlinear term
     norm = get_norm(psi)
-    psi = np.sqrt(particle_number) * psi / np.sqrt(norm)
+    psi = np.sqrt(particle_number) * np.abs(psi) * np.exp(1.0j * phase) / np.sqrt(norm)
     return psi
 
 def imaginary_timestep_grid2(psi, dt, g, omega, particle_number):
@@ -286,25 +270,7 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     
     return vortex_tracker(psi, theta_new, phi_new, counter + 1) #recur the function with the new coordinates as the new guesses
 
-#custom cyclic colormap to visualize the phase of the condensate
 
-def phasemap(N = 256, use_hpl = True):
-    h = np.ones(N) # hue
-    h[:N//2] = 11.6 # red 
-    h[N//2:] = 258.6 # blue
-    s = 100 # saturation
-    l = np.linspace(0, 100, N//2) # luminosity
-    l = np.hstack( (l,l[::-1] ) )
-
-    colorlist = np.zeros((N,3))
-    for ii in range(N):
-        if use_hpl:
-            colorlist[ii,:] = hsluv.hpluv_to_rgb((h[ii], s, l[ii]))
-        else:
-            colorlist[ii,:] = hsluv.hsluv_to_rgb((h[ii], s, l[ii]))
-    colorlist[colorlist > 1] = 1 # correct numeric errors
-    colorlist[colorlist < 0] = 0 
-    return col.ListedColormap(colorlist)
 
 
     

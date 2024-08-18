@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import pyshtools as pysh
 import spherical_GPE_functions as sgpe
 import spherical_GPE_params as params
+import cmocean
 
 from cartopy import crs
 from matplotlib import cm
@@ -16,10 +17,10 @@ plt.rcParams['mathtext.fontset'] = 'cm'
 
 #initialize wavefunction
 
-psi  = sgpe.generate_gridded_wavefunction(params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus, params.xi, params.bg_dens)
+psi = sgpe.generate_gridded_wavefunction(params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus, params.xi, params.bg_dens)
 particle_number = sgpe.get_norm(psi)
 
-for _ in range(500):
+for _ in range(300):
     psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number)
 
 #psi = np.loadtxt('J:/Uni - Physik/Master/Masterarbeit/Data/Initial conditions/initial condition2.txt', delimiter = ',', dtype = np.complex128)
@@ -27,9 +28,8 @@ for _ in range(500):
 
 #some stuff needed for plotting
 
-density_cmap = cm.plasma
-phase_cmap = sgpe.phasemap(use_hpl = False)
-myprojection = crs.Mollweide(central_longitude=180.)
+density_cmap = cmocean.cm.thermal
+phase_cmap = cmocean.cm.balance
 gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 
 #SIMULATION
@@ -132,7 +132,7 @@ for q in range(params.end + 1):
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
         axes[0].text(10, 80, textstr, fontsize=7, verticalalignment='top', bbox=props)
         
-        filename = './' + str(time) + 'ms.pdf'
+        filename = './wf_' + str(time) + 'ms.pdf'
 
         #plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
         
@@ -169,7 +169,7 @@ for q in range(params.end + 1):
             vortex_tracker[1, index] = theta_v_minus
         
     if conserved_tracking:
-        if (q % (params.end // conservative_number) == 0): #every conservative_number steps record the time, particle number, energy and angular momentum in the arrays initialized above (to plot the conserved quantities as function of time below)
+        if (q % (params.end // conservative_number) == 0): #conservative_number times record the time, particle number, energy and angular momentum in the arrays initialized above (to plot the conserved quantities as function of time below)
             index = q // conservative_number
             t[index] = params.real_dt * q
             particle_number_t[index] = sgpe.get_norm(psi)
@@ -177,7 +177,7 @@ for q in range(params.end + 1):
             energy_t[index] = ekin + eint + erot
             angular_momentum_t[index] = sgpe.get_ang_momentum(psi)
     
-    psi = sgpe.timestep_grid2(psi, params.dt, params.g, params.omega)
+    psi = sgpe.timestep_grid(psi, params.dt, params.g, params.omega)
 
 #np.savetxt('./vortex_tracker.txt', vortex_tracker, delimiter = ',')
 #np.savetxt('./t_tracker.txt', t_tracker, delimiter = ',')
@@ -190,19 +190,17 @@ for q in range(params.end + 1):
 
 print(vortex_tracker)
 
-t_tracker2 = np.delete(t_tracker, 2)
-vortex_tracker2 = np.delete(vortex_tracker, 2, axis = 1)
 
-plt.plot(t_tracker2, vortex_tracker2[0], label = r'$\theta_+$', marker = 'x', linestyle = 'None', mew = 0.7)
-#plt.plot(t_tracker2, vortex_tracker2[1], label = r'$\theta_-$', marker = '.', linestyle = 'None', mew = 0.7)
+#plt.plot(t_tracker[:-2], vortex_tracker[0,:-2], label = r'$\theta_+$', marker = '.', linestyle = 'None', mew = 0.7)
+plt.plot(t_tracker[:-2], vortex_tracker[1, :-2], label = r'$\theta_-$', marker = '.', linestyle = 'None', mew = 0.7)
 #plt.yticks(ticks = (0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi), labels = (0, r'$\pi/4$', r'$\pi/2$', r'$3\pi/4$', r'$\pi$'))
 #plt.ylim(0, np.pi)
 plt.gca().invert_yaxis()
 plt.xlabel(r'$t$ [ms]')
 plt.ylabel(r'$\theta$')
 plt.legend()
-filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/vortex tracking3.pdf'
-#plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
+filename = 'J:/Uni - Physik/Master/Masterarbeit/Media/Simulations of two vortices/vortex tracking2.pdf'
+plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
 
 
 #%%

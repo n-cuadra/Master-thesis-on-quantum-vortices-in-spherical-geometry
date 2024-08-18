@@ -3,8 +3,9 @@ import matplotlib.pyplot as plt
 import spherical_GPE_functions as sgpe
 import spherical_GPE_params as params
 import pyshtools as pysh
+import cmocean
 
-num = 50
+num = 100
 
 theta_plus = np.linspace(0.01, 20*np.pi/180, num)
 
@@ -13,7 +14,8 @@ ekin = np.zeros(shape = num, dtype = np.float64)
 erot = np.zeros(shape = num, dtype = np.float64)
 eint = np.zeros(shape = num, dtype = np.float64)
 
-#initialize wavefunction
+dens_cmap = cmocean.cm.thermal
+phase_cmap = cmocean.cm.balance
 
 for k in range(num):
     psi = sgpe.generate_gridded_wavefunction(theta_plus[k], np.pi, np.pi - theta_plus[k], np.pi, params.xi, params.bg_dens)
@@ -32,15 +34,15 @@ for k in range(num):
     clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = params.lmax)
     grid = clm.expand()
     grid_phase = clm_phase.expand()
-    grid.plot(colorbar = 'right', cb_label = 'Density', show = False)
-    grid_phase.plot(colorbar = 'right', cb_label = 'Phase', show = False)
+    grid.plot(cmap = dens_cmap, colorbar = 'right', cb_label = 'Density', show = False)
+    grid_phase.plot(cmap = phase_cmap, colorbar = 'right', cb_label = 'Phase', show = False)
     plt.show()
     print(k)           
 
 
-np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Recreating the results of Padavic et al/ekin20.txt', ekin, delimiter = ',')
-np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Recreating the results of Padavic et al/erot20.txt', erot, delimiter = ',')
-np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Recreating the results of Padavic et al/eint20.txt', eint, delimiter = ',')
+np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Recreating the results of Padavic et al/ekin20_highdens.txt', ekin, delimiter = ',')
+np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Recreating the results of Padavic et al/erot20_highdens.txt', erot, delimiter = ',')
+np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Recreating the results of Padavic et al/eint20_highdens.txt', eint, delimiter = ',')
 
 
 #%%
@@ -53,9 +55,7 @@ plt.rcParams['mathtext.fontset'] = 'cm'
 theta_plus_degrees = 180 * theta_plus / np.pi
 
 
-plt.plot(theta_plus_degrees, ekin + eint + erot * 0.4, label = r'$\~\omega = $ 0.49', linewidth = 0.8)
-plt.plot(theta_plus_degrees, ekin + eint + erot * 0.6, label = r'$\~\omega = $ 0.5', linewidth = 0.8)
-plt.plot(theta_plus_degrees, ekin + eint + erot * 0.8, label = r'$\~\omega = $ 0.51', linewidth = 0.8)
+plt.plot(theta_plus_degrees, eint + ekin + 0.5*erot,  linewidth = 0.8)
 
 
 
@@ -64,9 +64,11 @@ plt.plot(theta_plus_degrees, ekin + eint + erot * 0.8, label = r'$\~\omega = $ 0
 
 
 plt.xlabel(r'$\theta_+$')
-plt.ylabel(r'$E_{\text{tot}}$ $\left[ \frac{\hbar^2}{m R^2}  \right]$')
+plt.ylabel(r'$E_{\text{int}}$ $\left[ \frac{\hbar^2}{m R^2}  \right]$')
+plt.xticks(ticks = (0, 10, 20), labels = ('0°', '10°', '20°'))
+plt.xlim(-1,20)
 #plt.legend(fontsize = 'x-small')
-#plt.savefig('J:/Uni - Physik/Master/Masterarbeit/Media/total energy as a function of theta and omega5.pdf', format = 'pdf', dpi = 300) 
+#plt.savefig('J:/Uni - Physik/Master/Masterarbeit/Media/eint.pdf', format = 'pdf', dpi = 300) 
 
 #%%
 

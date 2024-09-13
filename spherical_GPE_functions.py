@@ -1,9 +1,8 @@
 import numpy as np
 import pyshtools as pysh
-import matplotlib.colors as col
 import spherical_GPE_params as params
 
-
+lstart = params.lmax - 50 #sh degree above which filtering will start (initially)
 
 #cotangent
 
@@ -187,6 +186,21 @@ def timestep_grid(psi, dt, g, omega):
     step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.complex128) #create array of same shape as coeffs with entries from step
     coeffs = coeffs * step_multiplier
     
+    spectrum = pysh.spectralanalysis.spectrum(coeffs, normalization = 'ortho')
+    
+    global lstart
+    if (spectrum[lstart] > spectrum[lstart - 10]):
+        lstart = lstart - 5
+        if (lstart < 2 * params.lmax // 3):
+            lstart = 2 * params.lmax // 3
+    
+    def exp_filter(i, l, m): #exponential filter
+        alpha = 0.01 
+        return np.exp(- alpha * (l - lstart))
+    
+    filter_multiplier = np.fromfunction(exp_filter, shape = np.shape(coeffs), dtype = np.float64) #create array from the filter with same shape as coeffs
+    coeffs[:, lstart:, :] = coeffs[:, lstart:, :] * filter_multiplier[:, lstart:, :] #apply filter from lstart onwards
+    
     
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
@@ -224,6 +238,29 @@ def imaginary_timestep_grid2(psi, dt, g, omega, particle_number):
     psi = np.sqrt(particle_number) * psi / np.sqrt(norm)
     return psi
 
+#filtering
+
+def filtering(psi, lstart, alpha, k):
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
+    spectrum = pysh.spectralanalysis.spectrum(coeffs, normalization = 'ortho')
+    
+    if (spectrum[lstart] > spectrum[lstart - 10]):
+        lstart = lstart - 5
+        if (lstart < 2 * params.lmax // 3):
+            lstart = 2 * params.lmax // 3
+    
+    def exp_filter(i, l, m): #exponential filter
+        return np.exp(- alpha * (l - lstart)**k)
+    
+    filter_multiplier = np.fromfunction(exp_filter, shape = np.shape(coeffs), dtype = np.float64) #create array from the filter with same shape as coeffs
+    coeffs[:, lstart:, :] = coeffs[:, lstart:, :] * filter_multiplier[:, lstart:, :] #apply filter from lstart onwards
+    
+    psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
+    
+    return psi
+    
+    
+    
 
 #vortex tracker
 
@@ -252,8 +289,9 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     Jacobian[1, 0] = np.sum(coeffs_theta_imag * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
     Jacobian[1, 1] = np.sum(coeffs_phi_imag * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
     
-    if (np.abs(psi_guess)**2 > 0.05 * np.max(np.abs(psi)**2)): #if density at guessed position is larger than 5% of maximum, possibly cannot guarantee convergence, so the tracking must be aborted
+    if (np.abs(psi_guess)**2 > 0.1 * np.max(np.abs(psi)**2)): #if density at guessed position is larger than 10% of maximum, possibly cannot guarantee convergence, so the tracking must be aborted
         print('Guessed position too far away from vortex core. Try again!')
+        print('Density at guessed position: ' + str(np.abs(psi_guess)**2))
         print('It took ' + str(counter) + ' iterations to arrive here')
         return 0, 0
     

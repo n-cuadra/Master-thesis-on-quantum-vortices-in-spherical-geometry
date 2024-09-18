@@ -2,7 +2,7 @@ import numpy as np
 import pyshtools as pysh
 import spherical_GPE_params as params
 
-lstart = params.lmax - 50 #sh degree above which filtering will start (initially)
+lstart = params.lmax - 20 #sh degree above which filtering will start (initially)
 
 #cotangent
 
@@ -208,7 +208,7 @@ def timestep_grid(psi, dt, g, omega):
 
 #the same timestep, but for imaginary time
 
-def imaginary_timestep_grid(psi, dt, g, omega, particle_number):
+def imaginary_timestep_grid(psi, dt, g, omega, particle_number, keep_phase = True):
     phase = np.angle(psi)
     psi = psi * np.exp(- 0.5 * g * dt * np.abs(psi)**2) #half timestep of nonlinear term
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
@@ -222,7 +222,10 @@ def imaginary_timestep_grid(psi, dt, g, omega, particle_number):
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     psi = psi * np.exp(- 0.5 * g * dt * np.abs(psi)**2) #half timestep of nonlinear term
     norm = get_norm(psi)
-    psi = np.sqrt(particle_number) * np.abs(psi) * np.exp(1.0j * phase) / np.sqrt(norm)
+    if keep_phase:
+        psi = np.sqrt(particle_number) * np.abs(psi) * np.exp(1.0j * phase) / np.sqrt(norm)
+    else:
+        psi = np.sqrt(particle_number) * psi / np.sqrt(norm)
     return psi
 
 def imaginary_timestep_grid2(psi, dt, g, omega, particle_number):
@@ -244,7 +247,7 @@ def filtering(psi, lstart, alpha, k):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     spectrum = pysh.spectralanalysis.spectrum(coeffs, normalization = 'ortho')
     
-    if (spectrum[lstart] > spectrum[lstart - 10]):
+    if (spectrum[lstart - 1] > spectrum[lstart - 10]):
         lstart = lstart - 5
         if (lstart < 2 * params.lmax // 3):
             lstart = 2 * params.lmax // 3

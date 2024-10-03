@@ -1,6 +1,9 @@
 import numpy as np
 import pyshtools as pysh
 import spherical_GPE_params as params
+from sympy.physics.quantum.cg import CG
+from sympy import S
+from scipy.sparse.linalg import LinearOperator, bicgstab
 
 lstart = params.lmax - 20 #sh degree above which filtering will start (initially)
 
@@ -105,10 +108,12 @@ def get_norm(psi):
 
 def deriv_phi(psi):
     sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
-    len_m = np.size(sh_coeffs, axis = 2) 
-    for m in range(len_m):
-        for i in range(2):
-            sh_coeffs[i,:,m] *= 1.0j * m * (-1.)**i  #spherical harmonics are eigenfunctions of del_phi, so need only to multiply coefficients with i*m to perform derivative
+    
+    def multiplier(i, l, m):
+        return 1.0j * m * (-1.)**i
+    
+    multiplier_array = np.fromfunction(multiplier, shape = np.shape(sh_coeffs), dtype = np.complex128) #create array from the multiplier function. The sh coeffs have to be multiplied with i*m to get the derivative wrt phi
+    sh_coeffs = sh_coeffs * multiplier_array #modify coeffs with the above array
     psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #back to real space, with the gridded data of the modified coefficients 
     return psi
 
@@ -116,18 +121,34 @@ def deriv_phi(psi):
 
 def Laplacian(psi):
     sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
-    len_l = np.size(sh_coeffs, axis = 1) 
-    for l in range(len_l):
-        sh_coeffs[:,l,:] *= - l * (l + 1) #spherical harmonics are eigenfunctions of angular Laplacian, so need only to multiply coefficients with -l(l+1) to perform Laplacian
+    
+    def multiplier(i, l, m):
+        return - l * (l + 1)
+    
+    multiplier_array = np.fromfunction(multiplier, shape = np.shape(sh_coeffs), dtype = np.float64) #create array from the multiplier function. The sh coeffs have to be multiplied with -l(l+1) to get the laplacian
+    sh_coeffs = sh_coeffs * multiplier_array #modify coeffs with the above array
     psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #back to real space, with the gridded data of the modified coefficients 
     return psi
+
+#angular Laplacian for real valued function
+
+def Laplacianr(f):
+    coeffs = pysh.expand.SHExpandDH(f, norm = 4, sampling = 2) 
+    
+    def multiplier(i, l, m):
+        return - l * (l + 1)
+    multiplier_array = np.fromfunction(multiplier, shape = np.shape(coeffs), dtype = np.float64)
+    coeffs = coeffs * multiplier_array
+    f = pysh.expand.MakeGridDH(coeffs, norm = 4, sampling = 2, extend = False)
+    return f
 
 #calculate energy of condensate (conserved quantitiy)
 
 
-def get_energy(psi, g, omega):
+def get_energy(psi, g, omega, G = 0):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     coeffs2 = pysh.expand.SHExpandDH(np.abs(psi)**2, norm = 4, sampling = 2)
+    coeffs_grav = pysh.expand.SHExpandDHC(psi * (np.cos(params.theta_grid) + 1), norm = 4, sampling = 2)
     
     def kinetic(i, l, m):
         return 0.5 * l * (l + 1) 
@@ -135,13 +156,16 @@ def get_energy(psi, g, omega):
         return omega * m * (-1.)**i
     
     kinetic_multiplier = np.fromfunction(kinetic, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
-    rotation_multiplier = np.fromfunction(rotation, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)    
+    rotation_multiplier = np.fromfunction(rotation, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
+    #gravity = G * params.dangle**2 * np.sin(params.theta_grid) * np.abs(psi)**2 * (np.cos(params.theta_grid) + 1)
     
     ekin = np.sum(kinetic_multiplier * np.abs(coeffs)**2)
     erot = np.sum(rotation_multiplier * np.abs(coeffs)**2)
     eint = np.sum(0.5 * g * coeffs2**2)
+    eg = np.real(np.sum(G * coeffs * np.conj(coeffs_grav)))
+
     
-    return ekin, eint, erot
+    return ekin, eint, erot, eg
 
 
 #calculate angular momentum of condensate in z direction (another conserved quantity).
@@ -176,8 +200,11 @@ def timestep_coeffs(coeffs, dt, g, omega):
 
 #the same timestep as above, except the input and output is the gridded data, i.e. the wavefunction
 
-def timestep_grid(psi, dt, g, omega):
+def timestep_grid(psi, dt, g, omega, G = 0, include_gravity = False):
     psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
+    if include_gravity:
+        psi = psi * np.exp(-1.0j * G * (np.cos(params.theta_grid) + 1) * dt)
+        
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     
     def step(i, l, m): #this function will be mutiplied entry wise with coeffs with entry indices i, l, m
@@ -270,8 +297,8 @@ def filtering(psi, lstart, alpha, k):
 def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     #expand sh coefficients of wave function, its real part and imaginary part
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) 
-    coeffs_real = pysh.expand.SHExpandDH(np.real(psi), norm = 4, sampling = 2) 
-    coeffs_imag = pysh.expand.SHExpandDH(np.imag(psi), norm = 4, sampling = 2) 
+    coeffs_real = pysh.expand.SHExpandDH(np.real(psi), norm = 1, sampling = 2) 
+    coeffs_imag = pysh.expand.SHExpandDH(np.imag(psi), norm = 1, sampling = 2) 
     
     #calculate gradient of real and imaginary part
     psi_theta_real, psi_phi_real = pysh.expand.MakeGradientDH(coeffs_real, sampling = 2) 
@@ -298,7 +325,7 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
         print('It took ' + str(counter) + ' iterations to arrive here')
         return 0, 0
     
-    if (np.abs(psi_guess)**2 < 1e-7 * np.max(np.abs(psi)**2)): #if the density at the guessed position is smaller than 1e-10 assume a reasonably converged solution and return the guess
+    if (np.abs(psi_guess)**2 < 1e-8 * np.max(np.abs(psi)**2)): #if the density at the guessed position is smaller than 1e-7 assume a reasonably converged solution and return the guess
         print('Number of iterations to convergence: ' + str(counter))
         return theta_guess, phi_guess
     
@@ -311,9 +338,114 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     
     return vortex_tracker(psi, theta_new, phi_new, counter + 1) #recur the function with the new coordinates as the new guesses
 
+################################### NEWTON RAPHSON ######################################################################
 
+#solve the linear system Jacobian * deltapsi = F[psig] with scipy bicgstab
+#the scipy linalg methods require that all vectors are in 1D form, therefore deltapsi is a 1D array of length 4N^2, 2 times all the points in the grid
+#the real and imaginary part of delta psi are arrays of length 2N^2
+#and I can reshape them onto the N x 2N grid to perform the effects of the linear operators in the Jacobian
 
+#sGPE functional
+def Functional(psi, g, omega, mu):  
+    F = - 0.5 * Laplacian(psi) + g * np.abs(psi)**2 * psi - 1.0j * omega * deriv_phi(psi) + mu * psi
+    return F
 
+def Jacobian11(deltapsir, psig, g, mu): #input is the guessed wf psig, parameters g and mu, deltapsir is the real part of deltapsi (the function to find)
+    deltapsir_grid = np.reshape(deltapsir, newshape = (params.N, 2 * params.N), order = 'C') #reshape into gridded data 
+    psigr = np.real(psig)
+    psigi = np.imag(psig)
+    result = - 0.5 * Laplacianr(deltapsir_grid) + g * (3 * psigr**2 + psigi**2) * deltapsir_grid + mu * deltapsir_grid #calculate result of the operator in the 1,1 entry of the Jacobian applied to deltapsir on the grid
+    result_flat = np.ravel(result, order = 'C') #flatten the grid again to 2*N^2 shape (required)
+    return result_flat
+
+def Jacobian12(deltapsii, psig, g, omega):#input is the guessed wf psig, parameters g and omega, deltapsii is the imaginary part of deltapsi (the function to find)
+    deltapsii_grid = np.reshape(deltapsii, newshape = (params.N, 2 * params.N), order = 'C') #reshape into gridded data 
+    psigr = np.real(psig)
+    psigi = np.imag(psig)
+    result = 2 * g * psigr * psigi * deltapsii_grid + omega * np.real(deriv_phi(deltapsii_grid)) #have to take real part of del phi here because the differentiation wrt phi necessarily requires complex SHs
+    result_flat = np.ravel(result, order = 'C') #flatten the grid again to 2*N^2 shape (required)
+    return result_flat
+
+def Jacobian21(deltapsir, psig, g, omega): #input is the guessed wf psig, parameters g and omega, deltapsir is the real part of deltapsi (the function to find)
+    deltapsir_grid = np.reshape(deltapsir, newshape = (params.N, 2 * params.N), order = 'C') #reshape into gridded data 
+    psigr = np.real(psig)
+    psigi = np.imag(psig)
+    result = 2 * g * psigr * psigi * deltapsir_grid - omega * np.real(deriv_phi(deltapsir_grid)) #have to take real part of del phi here because the differentiation wrt phi necessarily requires complex SHs
+    result_flat = np.ravel(result, order = 'C') #flatten the grid again to 2*N^2 shape (required)
+    return result_flat
+
+def Jacobian22(deltapsii, psig, g, mu):#input is the guessed wf psig, parameters g and mu, deltapsii is the imaginary part of deltapsi (the function to find)
+    deltapsii_grid = np.reshape(deltapsii, newshape = (params.N, 2 * params.N), order = 'C') #reshape into gridded data 
+    psigr = np.real(psig)
+    psigi = np.imag(psig)
+    result = - 0.5 * Laplacianr(deltapsii_grid) + g * (3 * psigi**2 + psigr**2) * deltapsii_grid + mu * deltapsii_grid
+    result_flat = np.ravel(result, order = 'C') #flatten the grid again to 2*N^2 shape (required)
+    return result_flat
+
+#matvec function that contains the information of the whole Jacobian to construct the linear operator, deltapsi is now a 1D array of length 4N^2
+def matvec_NR(deltapsi, psig, g, omega, mu):
+    deltapsir = deltapsi[:2 * params.N**2] #first 2N^2 entries correspond to real part of delta psi
+    deltapsii = deltapsi[2 * params.N**2 :] #second 2N^2 entries correspond to imaginary part of delta psi
+    
+    #compute the Jacobian applied to delta psi entry-wise
+    J11_deltapsir = Jacobian11(deltapsir, psig, g, mu)
+    J12_deltapsii = Jacobian12(deltapsii, psig, g, omega)
+    J21_deltapsir = Jacobian21(deltapsir, psig, g, omega)
+    J22_deltapsii = Jacobian22(deltapsii, psig, g, mu)
+    
+    #compute the two entries of Jacobian * delta psi
+    entry1 = J11_deltapsir + J12_deltapsii
+    entry2 = J21_deltapsir + J22_deltapsii
+    
+    result = np.concatenate((entry1, entry2)) #stick the two entries together to get a 1D array of length 4N^2 back again
+    
+    return result
+
+#full implementation of NR method
+
+def NR(psig, g, omega, mu, counter = 0):
+    F = Functional(psig, g, omega, mu) #compute Functional of psig
+    F_coeffs = pysh.expand.SHExpandDHC(F, norm = 4, sampling = 2) #compute CH coeffs of functional
+    norm = np.sqrt(np.sum(np.abs(F_coeffs)**2)) #compute norm of functional
+    
+    
+    print(counter)
+    print(norm)
+    
+    epsilon = 1.0
+    if (norm < epsilon): #if norm is smaller than epsilon, convergence is achieved and psig is returned
+        print('Iterations to convergence: ', counter)
+        return psig
+    
+    NR_operator = LinearOperator(shape = (4 * params.N**2, 4 * params.N**2), 
+                                 matvec = lambda deltapsi: matvec_NR(deltapsi, psig, g, omega, mu), 
+                                 dtype = np.float64)
+    
+    Fr_flat = np.ravel(np.real(F), order = 'C') #1D array of real part of functional
+    Fi_flat = np.ravel(np.imag(F), order = 'C') #1D array of imaginary part of functional
+    rhs = np.concatenate((Fr_flat, Fi_flat)) #right hand side of linearised problem as a 1D array
+    
+    #create starting guess for bicgstab algorithm
+    psigr_flat = np.ravel(np.real(psig), order = 'C') 
+    psigi_flat = np.ravel(np.imag(psig), order = 'C')
+    psi0 = np.concatenate((psigr_flat, psigi_flat))
+
+    psi, info = bicgstab(NR_operator, rhs, x0 = psi0) #perform bicgstab
+
+    if (info != 0):
+        print('BiCGSTAB did not converge. Info: ' + str(info) + '. Counter: ' + str(counter + 1))
+        return np.zeros(shape = (params.N, 2 * params.N), dtpye = np.complex128)
+    
+    #reshape result of bicgstab psi into real part and imaginary part of delta psi on the grid
+    deltapsir = np.reshape(psi[:2 * params.N**2], newshape = (params.N, 2 * params.N), order = 'C')
+    deltapsii = np.reshape(psi[2 * params.N**2:], newshape = (params.N, 2 * params.N), order = 'C')
+    
+    deltapsi = deltapsir + 1.0j * deltapsii #compute deltapsi
+    
+    psinew = psig - deltapsi #compute psinew
+    
+    #recur NR method with psinew as next guess
+    return NR(psinew, g, omega, mu, counter + 1)    
     
     
     

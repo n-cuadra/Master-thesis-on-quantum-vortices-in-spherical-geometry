@@ -4,7 +4,6 @@ import pyshtools as pysh
 import spherical_GPE_functions as sgpe
 import spherical_GPE_params as params
 import scienceplots
-import time
 import cmocean
 
 #set some parameters for plotting
@@ -37,15 +36,18 @@ gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 
 #after the if statement follows the plotting routine to give a plot of the density and phase of the wave function and a plot of the spectrum
 
-t = np.zeros(params.end//10 + 1, dtype = np.float64) #initialize array of passed time in the simulation
-energy_t = np.zeros(params.end//10 + 1, dtype = np.float64) #initialize array of energy as a function of time
-angmom = np.zeros(params.end//10 + 1, dtype = np.float64)
+plot_number = 20
+conserved_number = 1000
 
-plot_number = 10
+t = np.zeros(conserved_number + 1, dtype = np.float64) #initialize array of passed time in the simulation
+energy_t = np.zeros(conserved_number + 1, dtype = np.float64) #initialize array of energy as a function of time
+angmom = np.zeros(conserved_number + 1, dtype = np.float64)
+
+
 
 for q in range(params.end + 1):
     
-    if (q % (params.end // plot_number) == 0):  #plot 10 times during simulation
+    if (q % (params.end // plot_number) == 0):  #plot plot_number of times during simulation
         timer = round(params.dt * q, 3) #real time that has passed at this point in the simulation in ms
         
         
@@ -71,7 +73,7 @@ for q in range(params.end + 1):
 
         fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw, figsize = (10, 6))
         
-        plt.suptitle('Time evolution of two vortices at $t = $' + str(timer) + r'$\frac{m R^2}{\hbar}$', fontsize = 12)
+        plt.suptitle(r'Imaginary time evolution of two vortices at $\tau = $' + str(timer) + r'$\frac{m R^2}{\hbar}$', fontsize = 12)
 
         #subplot for denstiy
 
@@ -104,14 +106,14 @@ for q in range(params.end + 1):
        
         cb2 = axes[1].images[-1].colorbar
         cb2.mappable.set_clim(-np.pi, np.pi)
-        #cb2.ax.set_yticklabels([r'$-\pi$', 0, r'$+\pi$'])
+        cb2.ax.set_yticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
         
         
         #these lines put a textbox with some simulation parameters into the density plot
         
-        textstr ='\n'.join((r'$\omega=%.1f$' % (params.omega, ) + r'$\hbar/(m R^2)$', r'$g = %.3f$' % (params.g, ) + r'$\hbar^2/m$'))
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        axes[0].text(10, 80, textstr, fontsize=7, verticalalignment='top', bbox=props)
+        #textstr ='\n'.join((r'$\omega=%.1f$' % (params.omega, ) + r'$\hbar/(m R^2)$', r'$g = %.3f$' % (params.g, ) + r'$\hbar^2/m$'))
+        #props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        #axes[0].text(10, 80, textstr, fontsize=7, verticalalignment='top', bbox=props)
         
         filename = './wf_' + str(timer) + '.pdf'
 
@@ -121,31 +123,44 @@ for q in range(params.end + 1):
         
         clm.plot_spectrum(unit = 'per_l', show = False)
         
-        plt.title(r'Spectrum at $t = $' + str(timer) + r'$\frac{m R^2}{\hbar}$')
+        plt.title(r'Spectrum at $\tau = $' + str(timer) + r'$\frac{m R^2}{\hbar}$')
 
         filename = './spectrum_' + str(timer) + '.pdf'
 
         plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
         plt.show()
         
-    if (q % 10 == 0): #do this every 10 steps
-        index = q // 10
+    if (q % (params.end // conserved_number) == 0): #do this conserved_number of times
+        index = q // (params.end // conserved_number)
         t[index] = params.dt * q
         ekin, eint, erot = sgpe.get_energy(psi, params.g, 0.0)
-        energy_t[index] = ekin + eint + erot - 2 * np.pi * params.g * params.bg_dens**2
+        energy_t[index] = ekin + eint + erot 
         angmom[index] = sgpe.get_ang_momentum(psi)
     psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number, keep_phase = False)
 
-#header = 'bg_dens = ' + str(params.bg_dens) + ', theta+ = %.7f' % (params.theta_plus, ) + ', phi+ = %.7f' % (params.phi_plus, ) + ', theta- = %.7f' % (params.theta_minus, ) + ', phi- = %.7f' % (params.phi_minus, )
-#np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Initial conditions/initial condition4.txt', psi, delimiter = ',', header = header)
+
+np.savetxt('./energy.txt', energy_t, delimiter = ',')
+np.savetxt('./angular_momentum.txt', angmom, delimiter = ',')
 
 #%%
-#plot the energy as a function of time
 
-plt.plot(angmom[:375], energy_t[:375] - energy_t[375], lw = 0.7)
+plt.plot(angmom[:680], energy_t[:680], lw = 0.7)
 plt.ylabel(r'$E_{\text{tot}}$ $\left[ \frac{\hbar^2}{m R^2}  \right]$')
 plt.xlabel(r'$L_z [\hbar]$')
 filename = './energy-momentum.pdf'
 plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
 
+#%%
+
+plt.plot(t, energy_t, lw = 0.7)
+plt.ylabel(r'$E_{\text{tot}}$ $\left[ \frac{\hbar^2}{m R^2}  \right]$')
+plt.xlabel(r'$t \left[\frac{m R^2}{\hbar}\right]$')
+plt.savefig('./energy.pdf', dpi = 300, bbox_inches = 'tight', format = 'pdf')
+
+#%%
+
+plt.plot(t, angmom, lw = 0.7)
+plt.ylabel(r'$L_z [\hbar]$')
+plt.xlabel(r'$t \left[\frac{m R^2}{\hbar}\right]$')
+plt.savefig('./angular_momentum.pdf', dpi = 300, bbox_inches = 'tight', format = 'pdf')
 

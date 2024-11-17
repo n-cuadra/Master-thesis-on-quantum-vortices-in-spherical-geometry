@@ -1,6 +1,8 @@
 import numpy as np
 import pyshtools as pysh
 import spherical_GPE_params as params
+import cmocean
+import matplotlib.pyplot as plt
 from scipy.sparse.linalg import LinearOperator, bicgstab, gmres, bicg, lgmres, tfqmr
 
 lstart = params.lmax - 20 #sh degree above which filtering will start (initially)
@@ -336,7 +338,94 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     
     return vortex_tracker(psi, theta_new, phi_new, counter + 1) #recur the function with the new coordinates as the new guesses
 
-################################### NEWTON RAPHSON to find roots of stationary GPE ######################################################################
+
+
+#plotting routine (plots density and phase of wavefunction, plots spectrum of wavefunction)
+#psi: wavefunction to plot
+#include_title: True to include a title on the plots
+#wf_title: string of title of density + phase plot
+#spectrum_title: string of title of spectrum plot
+#save: True to save both plots
+#wf_path: string of path where to save density + phase plot
+#spectrum_path: string of path where to save spectrum plot
+#dpi: dpi of saved plots
+#ftype: filetype of saved plots
+def plot(psi, include_title = False, wf_title = '', spectrum_title = '', save = False, wf_path = '', spectrum_path = '', dpi = 300, ftype = 'pdf'):
+    
+    dens = np.abs(psi)**2 #calculate condensate density
+    phase_angle = np.angle(psi) #calculate phase of condensate
+    
+    
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #get sh coefficients for the wave function     
+    dens_coeffs = pysh.expand.SHExpandDH(dens, norm = 4, sampling = 2) #get sh coefficients for the density
+    phase_coeffs = pysh.expand.SHExpandDH(phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
+    
+    clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum (at the bottom)
+    dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance from the coefficient array for the density 
+    phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance from the coefficient array for the phase
+
+    dens_grid = dens_clm.expand() #create a SHGrid instance for the density 
+    phase_grid = phase_clm.expand() #create a SHGrid instance for the phase
+    
+    #plot
+    
+    gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
+
+    fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw, figsize = (10, 6))
+    
+    if include_title:
+        plt.suptitle(wf_title, fontsize = 12)
+
+    #subplot for denstiy
+
+    dens_grid.plot(cmap = cmocean.cm.thermal, 
+                   colorbar = 'right', 
+                   cb_label = 'Density', 
+                   xlabel = '', 
+                   tick_interval = [90,45], 
+                   tick_labelsize = 6, 
+                   axes_labelsize = 7,
+                   ax = axes[0],  
+                   show = False)
+    
+    cb2 = axes[0].images[-1].colorbar
+    cb2.mappable.set_clim(np.min(dens), np.max(dens))
+    
+    
+    #subplot for phase
+
+    phase_grid.plot(cmap = cmocean.cm.balance, 
+                    colorbar = 'right',
+                    cb_label = 'Phase',
+                    tick_interval = [90,45], 
+                    cb_tick_interval = np.pi,
+                    tick_labelsize = 6, 
+                    axes_labelsize = 7, 
+                    ax = axes[1],  
+                    show = False)
+    
+   
+    cb2 = axes[1].images[-1].colorbar
+    cb2.mappable.set_clim(-np.pi, np.pi)
+    cb2.ax.set_yticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
+    
+    if save:
+        plt.savefig(wf_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
+    
+    #plot spectrum
+    
+    clm.plot_spectrum(unit = 'per_l', show = False)
+    
+    if include_title:
+        plt.title(spectrum_title, fontsize = 12)
+    
+    if save:
+        plt.savefig(spectrum_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
+    plt.show()
+    return None
+
+
+################################### NEWTON RAPHSON ######################################################################
 
 #solve the linear system A * x = b
 #the scipy linalg methods require that all vectors are in 1D form, therefore v is a 1D array of length 4N^2 + 1, 2 times all the points in the grid + term for particle conservation
@@ -348,10 +437,6 @@ def Functional(psi, mu, g, omega):
     F = - 0.5 * Laplacian(psi) + g * np.abs(psi)**2 * psi - 1.0j * omega * deriv_phi(psi) - mu * psi
     return F
 
-
-
-########## keep µ constant, particle number can change
-
 #matvec function that contains the information of the whole Jacobian to construct the linear operator, v is now a 1D array of length 4N^2 
 def matvec_NR2D(v, psig, mu, g, omega):
     deltapsir = v[:2 * params.N**2] #first 2N^2 entries correspond to real part of delta psi
@@ -361,7 +446,7 @@ def matvec_NR2D(v, psig, mu, g, omega):
     deltapsii_grid = np.reshape(deltapsii, newshape = (params.N, 2 * params.N), order = 'C')
     
     #calculate the entries of A * v on the grid and then flatten them
-    A11_deltapsir = -0.5 * Laplacianr(deltapsir_grid) + g * (3 * np.real(psig)**2 + np.imag(psig)**2) * deltapsir_grid - mu * deltapsir_grid
+    A11_deltapsir = - 0.5 * Laplacianr(deltapsir_grid) + g * (3 * np.real(psig)**2 + np.imag(psig)**2) * deltapsir_grid - mu * deltapsir_grid
     A12_deltapsii = 2 * g * np.real(psig) * np.imag(psig) * deltapsii_grid + omega * np.real(deriv_phi(deltapsii_grid))
     entry1 = np.ravel(A11_deltapsir + A12_deltapsii, order = 'C')
     
@@ -400,7 +485,12 @@ def NR2D(psig, mu, g, omega, epsilon, counter = 0):
     Fi_flat = np.ravel(np.imag(F), order = 'C') #1D array of imaginary part of functional
     b = np.concatenate((Fr_flat, Fi_flat)) #right hand side of linearised problem as a 1D array
     
-    result, info = gmres(NR_operator, b, rtol = .1, restart = 10) #perform algorithm to solve linear equation
+    #create starting guess for bicgstab algorithm
+    psigr_flat = np.ravel(np.real(psig), order = 'C') 
+    psigi_flat = np.ravel(np.imag(psig), order = 'C')
+    psi0 = np.concatenate((psigr_flat, psigi_flat))
+
+    result, info = gmres(NR_operator, b, x0 = psi0, rtol = .1, restart = 10) #perform algorithm to solve linear equation
 
     if (info != 0):
         print('Linear solver did not converge. Info: ' + str(info) + '. Counter: ' + str(counter + 1))
@@ -414,10 +504,10 @@ def NR2D(psig, mu, g, omega, epsilon, counter = 0):
     
     psinew = psig - deltapsi 
     
-    #recur NR method with psinew as next guess
+    #recur NR method with psinew, munew as next guess
     return NR2D(psinew, mu, g, omega, epsilon, counter + 1)    
 
-########second try, here chemical potential is also varied, particle number fixed
+#second try
 
 def A(v, psig, mug, g, omega):
     #extract deltapsi, deltapsi*, deltamu from input vector v
@@ -496,87 +586,5 @@ def NR3D(psig, mug, g, omega, particle_number, epsilon, counter = 0):
     return NR3D(psinew, munew, g, omega, particle_number, epsilon, counter + 1)
 
 
-##################third try, NR for sh coeffs, not on the grid
-
-
-#matvec function that contains the information of the whole Jacobian to construct the linear operator, v is now a 1D array of length 2 * 2 * (lmax + 1) * (lmax + 1) = N^2 
-def matvec_NR2D_coeffs(v, psig, mu, g, omega):
-    coeffsr_flat = v[:params.N**2//2] #first N^2/2 entries correspond to coefficients of real part of delta psi
-    coeffsi_flat = v[params.N**2//2:] #second N^2/2 entries correspond to coefficients of imaginary part of delta psi
-    
-    #reshape into usual shape of sh coefficient array
-    coeffsr = np.reshape(coeffsr_flat, newshape = (2, params.lmax + 1, params.lmax + 1), order = 'C')
-    coeffsi = np.reshape(coeffsi_flat, newshape = (2, params.lmax + 1, params.lmax + 1), order = 'C')
-    
-    #translate coeffs into functions on the grid
-    deltapsir_grid = pysh.expand.MakeGridDH(coeffsr, norm = 4, sampling = 2, extend = False)
-    deltapsii_grid = pysh.expand.MakeGridDH(coeffsi, norm = 4, sampling = 2, extend = False)
-    
-    #calculate the entries of A * v on the grid and then translate back to coefficient space
-    A11_deltapsir = -0.5 * Laplacianr(deltapsir_grid) + g * (3 * np.real(psig)**2 + np.imag(psig)**2) * deltapsir_grid - mu * deltapsir_grid
-    A12_deltapsii = 2 * g * np.real(psig) * np.imag(psig) * deltapsii_grid + omega * np.real(deriv_phi(deltapsii_grid))
-    coeffs1 = pysh.expand.SHExpandDH(A11_deltapsir + A12_deltapsii, norm = 4, sampling = 2)
-    
-    A21_deltapsir = 2 * g * np.real(psig) * np.imag(psig) * deltapsir_grid - omega * np.real(deriv_phi(deltapsir_grid))
-    A22_deltapsii = - 0.5 * Laplacianr(deltapsii_grid) + g * (3 * np.imag(psig)**2 + np.real(psig)**2) * deltapsii_grid - mu * deltapsii_grid
-    coeffs2 = pysh.expand.SHExpandDH(A21_deltapsir + A22_deltapsii, norm = 4, sampling = 2)
-    
-    #flatten both coefficient arrays
-    coeffs1 = np.ravel(coeffs1, order = 'C')
-    coeffs2 = np.ravel(coeffs1, order = 'C')
-    
-    #concatenate them and return
-    result = np.concatenate((coeffs1, coeffs2))
-
-    return result
 
     
-
-#full implementation of NR method
-
-def NR2D_coeffs(psig, mu, g, omega, epsilon, counter = 0):
-    F = Functional(psig, mu, g, omega) #compute Functional of psig
-    F_coeffs = pysh.expand.SHExpandDHC(F, norm = 4, sampling = 2) #compute SH coeffs of functional
-    Fr_coeffs = pysh.expand.SHExpandDH(np.real(F), norm = 4, sampling = 2) #compute SH coeffs of real part of functional
-    Fi_coeffs = pysh.expand.SHExpandDH(np.imag(F), norm = 4, sampling = 2) #compute SH coeffs of real part of functional
-    norm = np.sqrt(np.sum(np.abs(F_coeffs)**2) / get_norm(psig)) #compute norm of functional
-    
-    
-    print(counter)
-    print(norm)
-    print(get_norm(psig))
-    
-    if (norm < epsilon): #if norm is smaller than epsilon * energy, convergence is achieved and psig is returned
-        print('Iterations to convergence: ', counter)
-        return psig
-    
-    def mv(v):
-        return matvec_NR2D_coeffs(v, psig, mu, g, omega)
-
-    NR_operator = LinearOperator(shape = (params.N**2, params.N**2), 
-                                 matvec = mv, 
-                                 dtype = np.float64)
-    
-    Fr_coeffs_flat = np.ravel(Fr_coeffs, order = 'C') #1D array of coeffs real part of functional
-    Fi_coeffs_flat = np.ravel(Fi_coeffs, order = 'C') #1D array of coeffs of imaginary part of functional
-    b = np.concatenate((Fr_coeffs_flat, Fi_coeffs_flat)) #right hand side of linearised problem as a 1D array
-
-    result, info = gmres(NR_operator, b, rtol = .1, restart = 10) #perform algorithm to solve linear equation
-
-    if (info != 0):
-        print('Linear solver did not converge. Info: ' + str(info) + '. Counter: ' + str(counter + 1))
-        return np.zeros(shape = (params.N, 2 * params.N), dtype = np.complex128)
-    
-    #reshape result of bicgstab into coeffs of real and imaginary part of delta psi
-    coeffsr = np.reshape(result[:params.N**2//2], newshape = (2, params.lmax + 1, params.lmax + 1), order = 'C')
-    coeffsi = np.reshape(result[params.N**2//2:], newshape = (2, params.lmax + 1, params.lmax + 1), order = 'C')
-    
-    deltapsir = pysh.expand.MakeGridDH(coeffsr, norm = 4, sampling = 2, extend = False)
-    deltapsii = pysh.expand.MakeGridDH(coeffsi, norm = 4, sampling = 2, extend = False)
-    
-    deltapsi = deltapsir + 1.0j * deltapsii #compute deltapsi
-    
-    psinew = psig - deltapsi 
-    
-    #recur NR method with psinew as next guess
-    return NR2D(psinew, mu, g, omega, epsilon, counter + 1) 

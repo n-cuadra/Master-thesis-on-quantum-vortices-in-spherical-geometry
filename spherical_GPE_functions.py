@@ -2,6 +2,7 @@ import numpy as np
 import pyshtools as pysh
 import spherical_GPE_params as params
 import cmocean
+import inspect
 import matplotlib.pyplot as plt
 from scipy.sparse.linalg import LinearOperator, bicgstab, gmres, bicg, lgmres, tfqmr
 
@@ -23,15 +24,16 @@ def sph2cart(theta, phi):
 
 #transformation from cartesian to spherical coordinates
 
-
 def cart2sph(x, y, z):
     r = np.sqrt(x^2 + y^2 + z^2)
     theta = np.arccos(z/r)
     phi = np.arctan2(x,y)
     return theta, phi
 
-#define initial phase angle of a vortex antivortex pair at the positions (theta_plus, phi_plus) and (theta_minus, phi_minus)
 
+####################### INITIAL CONDITION #############################################################
+
+#initial phase angle of a vortex antivortex pair at the positions (theta_plus, phi_plus) and (theta_minus, phi_minus) on the grid
 
 def phase(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus):
     denom1 = cot(theta/2) * np.sin(phi) - cot(theta_plus/2) * np.sin(phi_plus)
@@ -43,8 +45,7 @@ def phase(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus):
     return phase
 
 
-#define a model initial magnitude of the wavefunction (a function that goes from 0 to 1 over the length scale of the healing length xi at the position of the vortices)
-
+#model initial magnitude of the wavefunction (a function that goes from 0 to 1 over the length scale of the healing length xi at the position of the vortices)
 
 def initial_magnitude(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus, xi):
     
@@ -66,6 +67,7 @@ def initial_magnitude(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus, 
     
     return 1. - np.exp(- arc_length_plus / xi) - np.exp(- arc_length_minus / xi)
 
+#same model initial magnitude, but for only one vortex
 
 def one_vortex_magnitude(theta, phi, theta_v, phi_v, xi):
     x, y, z = sph2cart(theta, phi)
@@ -78,8 +80,8 @@ def one_vortex_magnitude(theta, phi, theta_v, phi_v, xi):
     
     return 1. - np.exp(- arc_length / xi)
 
-#define a function that generates gridded data for the wave function
 
+#function that generates gridded data for the wave function using the magnitude and phase above
 
 def generate_gridded_wavefunction(theta_plus, phi_plus, theta_minus, phi_minus, xi, bg_dens):
     psi = np.zeros(shape = (params.N, 2*params.N), dtype = np.complex128)
@@ -93,18 +95,9 @@ def generate_gridded_wavefunction(theta_plus, phi_plus, theta_minus, phi_minus, 
             psi[i,j] = np.sqrt(params.bg_dens) * one_vortex_magnitude(params.theta[i], params.phi[j], theta_minus, phi_minus, xi) * np.exp(1.0j * phase(params.theta[i], params.phi[j], theta_plus, phi_plus, theta_minus, phi_minus)) 
     return psi
 
-    
-#define norm function, this calculates particle number of the condensate
+#################### DERIVATIVES ###############################
 
-
-def get_norm(psi):
-    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #sh coefficients of wavefunction
-    norm = np.sum(np.abs(coeffs)**2) #sum over the absolute value squared of all coefficients
-    return norm
-
-
-#define derivative wrt azimuthal coordinate
-
+#derivative with respect to azimuthal angle phi of a function psi
 
 def deriv_phi(psi):
     sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
@@ -117,7 +110,7 @@ def deriv_phi(psi):
     psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #back to real space, with the gridded data of the modified coefficients 
     return psi
 
-#define angular Laplacian
+#angular laplacian of a function psi
 
 def Laplacian(psi):
     sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
@@ -130,7 +123,7 @@ def Laplacian(psi):
     psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #back to real space, with the gridded data of the modified coefficients 
     return psi
 
-#angular Laplacian for real valued function
+#angular laplacian for a real valued function f
 
 def Laplacianr(f):
     coeffs = pysh.expand.SHExpandDH(f, norm = 4, sampling = 2) 
@@ -142,13 +135,21 @@ def Laplacianr(f):
     f = pysh.expand.MakeGridDH(coeffs, norm = 4, sampling = 2, extend = False)
     return f
 
-#calculate energy of condensate (conserved quantitiy)
 
+############################## CONSERVED QUANTITIES #####################################################
+
+#norm function, calculates particle number of the condensate
+
+def get_norm(psi):
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #sh coefficients of wavefunction
+    norm = np.sum(np.abs(coeffs)**2) #sum over the absolute value squared of all coefficients
+    return norm
+
+#calculate energy of condensate
 
 def get_energy(psi, g, omega, G = 0):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     coeffs2 = pysh.expand.SHExpandDH(np.abs(psi)**2, norm = 4, sampling = 2)
-    coeffs_grav = pysh.expand.SHExpandDHC(psi * (np.cos(params.theta_grid) + 1), norm = 4, sampling = 2)
     
     def kinetic(i, l, m):
         return 0.5 * l * (l + 1) 
@@ -157,18 +158,19 @@ def get_energy(psi, g, omega, G = 0):
     
     kinetic_multiplier = np.fromfunction(kinetic, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
     rotation_multiplier = np.fromfunction(rotation, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
-    #gravity = G * params.dangle**2 * np.sin(params.theta_grid) * np.abs(psi)**2 * (np.cos(params.theta_grid) + 1)
     
     ekin = np.sum(kinetic_multiplier * np.abs(coeffs)**2)
     erot = np.sum(rotation_multiplier * np.abs(coeffs)**2)
     eint = np.sum(0.5 * g * coeffs2**2)
-    eg = np.real(np.sum(G * coeffs * np.conj(coeffs_grav)))
-
     
-    return ekin, eint, erot, eg
+    if G:
+        coeffs_grav = pysh.expand.SHExpandDHC(psi * (np.cos(params.theta_grid) + 1), norm = 4, sampling = 2)
+        eg = np.real(np.sum(G * coeffs * np.conj(coeffs_grav)))
+        return ekin, eint, erot, eg
+    
+    return ekin, eint, erot
 
-
-#calculate angular momentum of condensate in z direction (another conserved quantity).
+#calculate angular momentum of condensate in z direction
 
 def get_ang_momentum(psi):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
@@ -181,10 +183,9 @@ def get_ang_momentum(psi):
     
     return mom
 
+############################## TIME EVOLUTION ##############################################################
 
-
-#one timestep with split stepping method where the sh coefficients are the input and output
-
+#timestep with split stepping method where the sh coefficients are the input and output
 
 def timestep_coeffs(coeffs, dt, g, omega):
     def step(i, l, m): #this function will be mutiplied entry wise with coeffs with entry indices i, l, m
@@ -198,7 +199,7 @@ def timestep_coeffs(coeffs, dt, g, omega):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #calculate expansion coefficients from the gridded data
     return coeffs
 
-#the same timestep as above, except the input and output is the gridded data, i.e. the wavefunction
+#same timestep as above, except the input and output is the gridded data (includes a filter for dealiasing)
 
 def timestep_grid(psi, dt, g, omega, G = 0, include_gravity = False):
     psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
@@ -233,7 +234,7 @@ def timestep_grid(psi, dt, g, omega, G = 0, include_gravity = False):
     psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
     return psi
 
-#the same timestep, but for imaginary time
+#the same timestep, but for imaginary time on the grid
 
 def imaginary_timestep_grid(psi, dt, g, omega, particle_number, keep_phase = True):
     phase = np.angle(psi)
@@ -255,20 +256,7 @@ def imaginary_timestep_grid(psi, dt, g, omega, particle_number, keep_phase = Tru
         psi = np.sqrt(particle_number) * psi / np.sqrt(norm)
     return psi
 
-def imaginary_timestep_grid2(psi, dt, g, omega, particle_number):
-    coeffs = pysh.expand.SHExpandDHC(griddh = psi, norm = 4, sampling = 2)
-    len_l = np.size(coeffs, axis = 1)  #size of sh_coeffs array in l and m indices(degree and order)
-    for l in range(len_l):
-        for m in range(len_l):
-            for i in range(2):
-                coeffs[i,l,m] *= np.exp(- 0.5 * l * (l + 1) * dt ) * np.exp(- m * omega * dt * (-1.)**i)  #timestep of kinetic and rotating term
-    psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
-    psi *= np.exp(- g * dt * np.abs(psi)**2) #timestep of nonlinear term
-    norm = get_norm(psi)
-    psi = np.sqrt(particle_number) * psi / np.sqrt(norm)
-    return psi
-
-#filtering
+#filtering method to use outside of the timesteps
 
 def filtering(psi, lstart, alpha, k):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
@@ -290,9 +278,7 @@ def filtering(psi, lstart, alpha, k):
     return psi
     
     
-    
-
-#vortex tracker
+################### VORTEX TRACKING ############################
 
 def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     #expand sh coefficients of wave function, its real part and imaginary part
@@ -340,17 +326,16 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
 
 
 
-#plotting routine (plots density and phase of wavefunction, plots spectrum of wavefunction)
+############## PLOTTING ROUTINE (plots density and phase of wavefunction, plots spectrum of wavefunction) ############
+
 #psi: wavefunction to plot
-#include_title: True to include a title on the plots
 #wf_title: string of title of density + phase plot
 #spectrum_title: string of title of spectrum plot
-#save: True to save both plots
 #wf_path: string of path where to save density + phase plot
 #spectrum_path: string of path where to save spectrum plot
 #dpi: dpi of saved plots
 #ftype: filetype of saved plots
-def plot(psi, include_title = False, wf_title = '', spectrum_title = '', save = False, wf_path = '', spectrum_path = '', dpi = 300, ftype = 'pdf'):
+def plot(psi, wf_title = '', spectrum_title = '', wf_path = '', spectrum_path = '', dpi = 300, ftype = 'pdf'):
     
     dens = np.abs(psi)**2 #calculate condensate density
     phase_angle = np.angle(psi) #calculate phase of condensate
@@ -373,7 +358,7 @@ def plot(psi, include_title = False, wf_title = '', spectrum_title = '', save = 
 
     fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw, figsize = (10, 6))
     
-    if include_title:
+    if wf_title:
         plt.suptitle(wf_title, fontsize = 12)
 
     #subplot for denstiy
@@ -409,17 +394,17 @@ def plot(psi, include_title = False, wf_title = '', spectrum_title = '', save = 
     cb2.mappable.set_clim(-np.pi, np.pi)
     cb2.ax.set_yticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
     
-    if save:
+    if wf_path:
         plt.savefig(wf_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
     
     #plot spectrum
     
     clm.plot_spectrum(unit = 'per_l', show = False)
     
-    if include_title:
+    if spectrum_title:
         plt.title(spectrum_title, fontsize = 12)
     
-    if save:
+    if spectrum_path:
         plt.savefig(spectrum_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
     plt.show()
     return None
@@ -431,6 +416,8 @@ def plot(psi, include_title = False, wf_title = '', spectrum_title = '', save = 
 #the scipy linalg methods require that all vectors are in 1D form, therefore v is a 1D array of length 4N^2 + 1, 2 times all the points in the grid + term for particle conservation
 #the real and imaginary part of delta psi are arrays of length 2N^2
 #and I can reshape them onto the N x 2N grid to perform the effects of the linear operators in the Jacobian
+#NR2D is for the NR method where the chemical potential is kept constant
+#NR3D includes the chemical potential as parameter to be varied, keeping the particle number constant
 
 #sGPE functional
 def Functional(psi, mu, g, omega):  
@@ -438,6 +425,7 @@ def Functional(psi, mu, g, omega):
     return F
 
 #matvec function that contains the information of the whole Jacobian to construct the linear operator, v is now a 1D array of length 4N^2 
+
 def matvec_NR2D(v, psig, mu, g, omega):
     deltapsir = v[:2 * params.N**2] #first 2N^2 entries correspond to real part of delta psi
     deltapsii = v[2 * params.N**2:] #second 2N^2 entries correspond to imaginary part of delta psi
@@ -467,8 +455,8 @@ def NR2D(psig, mu, g, omega, epsilon, counter = 0):
     
     
     print(counter)
-    print(norm)
-    print(get_norm(psig))
+    #print(norm)
+    #print(get_norm(psig))
     
     if (norm < epsilon): #if norm is smaller than epsilon * energy, convergence is achieved and psig is returned
         print('Iterations to convergence: ', counter)
@@ -489,8 +477,13 @@ def NR2D(psig, mu, g, omega, epsilon, counter = 0):
     psigr_flat = np.ravel(np.real(psig), order = 'C') 
     psigi_flat = np.ravel(np.imag(psig), order = 'C')
     psi0 = np.concatenate((psigr_flat, psigi_flat))
+    
+    
+    def callback(xk):
+        residual = np.linalg.norm(b - NR_operator * xk) / np.linalg.norm(b)
+        print(residual)
 
-    result, info = gmres(NR_operator, b, x0 = psi0, rtol = .1, restart = 10) #perform algorithm to solve linear equation
+    result, info = bicgstab(NR_operator, b, x0 = psi0, rtol = .2, callback = callback) #perform algorithm to solve linear equation
 
     if (info != 0):
         print('Linear solver did not converge. Info: ' + str(info) + '. Counter: ' + str(counter + 1))

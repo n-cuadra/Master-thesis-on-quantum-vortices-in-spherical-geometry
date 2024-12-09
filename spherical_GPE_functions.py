@@ -2,9 +2,18 @@ import numpy as np
 import pyshtools as pysh
 import spherical_GPE_params as params
 import cmocean
-import inspect
 import matplotlib.pyplot as plt
-from scipy.sparse.linalg import LinearOperator, bicgstab, gmres, bicg, lgmres, tfqmr
+from scipy.sparse.linalg import LinearOperator, gmres, lgmres, gcrotmk
+
+import scienceplots
+
+#set some parameters for plotting
+
+plt.style.use('science')
+plt.rcParams.update({'font.size': 7})
+plt.rc('xtick', labelsize='x-small')
+plt.rc('ytick', labelsize='x-small')
+
 
 lstart = params.lmax - 20 #sh degree above which filtering will start (initially)
 
@@ -81,18 +90,14 @@ def one_vortex_magnitude(theta, phi, theta_v, phi_v, xi):
     return 1. - np.exp(- arc_length / xi)
 
 
-#function that generates gridded data for the wave function using the magnitude and phase above
+#function that generates gridded data for a vortex dipole using the magnitude and phase above
 
-def generate_gridded_wavefunction(theta_plus, phi_plus, theta_minus, phi_minus, xi, bg_dens):
-    psi = np.zeros(shape = (params.N, 2*params.N), dtype = np.complex128)
+def IC_vortex_dipole(theta_plus, phi_plus, theta_minus, phi_minus, xi, bg_dens):
+    phaseangle = phase(params.THETA, params.PHI, theta_plus, phi_plus, theta_minus, phi_minus)
+    magplus = one_vortex_magnitude(params.THETA, params.PHI, theta_plus, phi_plus, xi)
+    magminus = one_vortex_magnitude(params.THETA, params.PHI, theta_minus, phi_minus, xi)
+    psi = np.sqrt(bg_dens) * magplus * magminus * np.exp(1j * phaseangle)
     
-    for i in range(params.N//2):
-        for j in range(2*params.N):
-            psi[i,j] = np.sqrt(bg_dens) * one_vortex_magnitude(params.theta[i], params.phi[j], theta_plus, phi_plus, xi) * np.exp(1.0j * phase(params.theta[i], params.phi[j], theta_plus, phi_plus, theta_minus, phi_minus))       
-            
-    for i in range(params.N//2, params.N):
-        for j in range(2 * params.N):
-            psi[i,j] = np.sqrt(params.bg_dens) * one_vortex_magnitude(params.theta[i], params.phi[j], theta_minus, phi_minus, xi) * np.exp(1.0j * phase(params.theta[i], params.phi[j], theta_plus, phi_plus, theta_minus, phi_minus)) 
     return psi
 
 #################### DERIVATIVES ###############################
@@ -201,9 +206,9 @@ def timestep_coeffs(coeffs, dt, g, omega):
 
 #same timestep as above, except the input and output is the gridded data (includes a filter for dealiasing)
 
-def timestep_grid(psi, dt, g, omega, G = 0, include_gravity = False):
+def timestep_grid(psi, dt, g, omega, G = 0, mu = 0):
     psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
-    if include_gravity:
+    if G:
         psi = psi * np.exp(-1.0j * G * (np.cos(params.theta_grid) + 1) * dt)
         
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
@@ -231,6 +236,9 @@ def timestep_grid(psi, dt, g, omega, G = 0, include_gravity = False):
     
     
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
+    
+    if mu:
+        psi = psi * np.exp(1.0j * dt * mu)
     psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
     return psi
 
@@ -260,12 +268,6 @@ def imaginary_timestep_grid(psi, dt, g, omega, particle_number, keep_phase = Tru
 
 def filtering(psi, lstart, alpha, k):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
-    spectrum = pysh.spectralanalysis.spectrum(coeffs, normalization = 'ortho')
-    
-    if (spectrum[lstart - 1] > spectrum[lstart - 10]):
-        lstart = lstart - 5
-        if (lstart < 2 * params.lmax // 3):
-            lstart = 2 * params.lmax // 3
     
     def exp_filter(i, l, m): #exponential filter
         return np.exp(- alpha * (l - lstart)**k)
@@ -335,7 +337,7 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
 #spectrum_path: string of path where to save spectrum plot
 #dpi: dpi of saved plots
 #ftype: filetype of saved plots
-def plot(psi, wf_title = '', spectrum_title = '', wf_path = '', spectrum_path = '', dpi = 300, ftype = 'pdf'):
+def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_path = '', spectrum_path = '', spectrum2d_path = '', dpi = 300, ftype = 'pdf'):
     
     dens = np.abs(psi)**2 #calculate condensate density
     phase_angle = np.angle(psi) #calculate phase of condensate
@@ -406,6 +408,18 @@ def plot(psi, wf_title = '', spectrum_title = '', wf_path = '', spectrum_path = 
     
     if spectrum_path:
         plt.savefig(spectrum_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
+        
+    '''
+    #plot 2d spectrum 
+    
+    clm.plot_spectrum2d(show = False)
+    
+    if spectrum2d_title:
+        plt.title(spectrum2d_title, fontsize = 12)
+        
+    if spectrum2d_path:
+        plt.savefig(spectrum2d_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
+    '''
     plt.show()
     return None
 
@@ -425,6 +439,22 @@ def Functional(psi, mu, g, omega):
     return F
 
 #matvec function that contains the information of the whole Jacobian to construct the linear operator, v is now a 1D array of length 4N^2 
+
+def matvecsimple(v, psig, mu, g, omega):
+    deltapsir = v[:2 * params.N**2] #first 2N^2 entries correspond to real part of delta psi
+    deltapsii = v[2 * params.N**2:] #second 2N^2 entries correspond to imaginary part of delta psi
+    
+    
+    deltapsi = deltapsir + 1j * deltapsii
+    deltapsi_grid = np.reshape(deltapsi, newshape = (params.N, 2 * params.N), order = 'C')
+    
+    
+    yy = -0.5 * Laplacian(deltapsi_grid) + g * (2 * np.abs(psig)**2 + psig**2) * deltapsi_grid - mu * deltapsi_grid - 1j * omega * deriv_phi(deltapsi_grid)
+    
+    yy = np.ravel(yy, order = 'C')
+
+    return np.concatenate((np.real(yy), np.imag(yy)))
+
 
 def matvec_NR2D(v, psig, mu, g, omega):
     deltapsir = v[:2 * params.N**2] #first 2N^2 entries correspond to real part of delta psi
@@ -448,42 +478,50 @@ def matvec_NR2D(v, psig, mu, g, omega):
 
 #full implementation of NR method
 
-def NR2D(psig, mu, g, omega, epsilon, counter = 0):
+def NR2D(psig, mu, g, omega, epsilon,  counter = 0):
     F = Functional(psig, mu, g, omega) #compute Functional of psig
     F_coeffs = pysh.expand.SHExpandDHC(F, norm = 4, sampling = 2) #compute SH coeffs of functional
+    
+    Fclm = pysh.SHCoeffs.from_array(F_coeffs, normalization='ortho', lmax = params.lmax)
+    Fgrid = Fclm.expand()
+    Fgrid.plot(cmap = cmocean.cm.thermal, 
+                   colorbar = 'right', 
+                   cb_label = 'F', 
+                   tick_interval = [90,45], 
+                   tick_labelsize = 6, 
+                   axes_labelsize = 7,
+                   show = True)
     norm = np.sqrt(np.sum(np.abs(F_coeffs)**2) / get_norm(psig)) #compute norm of functional
     
     
     print(counter)
-    #print(norm)
-    #print(get_norm(psig))
+    print(norm)
+    #print(get_norm(psinew))
     
-    if (norm < epsilon): #if norm is smaller than epsilon * energy, convergence is achieved and psig is returned
+    if (norm < epsilon): #if norm is smaller than epsilon * energy, convergence is achieved and psinew is returned
         print('Iterations to convergence: ', counter)
         return psig
     
     def mv(v):
         return matvec_NR2D(v, psig, mu, g, omega)
 
-    NR_operator = LinearOperator(shape = (4 * params.N**2, 4 * params.N**2), 
+    A = LinearOperator(shape = (4 * params.N**2, 4 * params.N**2), 
                                  matvec = mv, 
                                  dtype = np.float64)
     
     Fr_flat = np.ravel(np.real(F), order = 'C') #1D array of real part of functional
     Fi_flat = np.ravel(np.imag(F), order = 'C') #1D array of imaginary part of functional
-    b = np.concatenate((Fr_flat, Fi_flat)) #right hand side of linearised problem as a 1D array
-    
-    #create starting guess for bicgstab algorithm
-    psigr_flat = np.ravel(np.real(psig), order = 'C') 
-    psigi_flat = np.ravel(np.imag(psig), order = 'C')
-    psi0 = np.concatenate((psigr_flat, psigi_flat))
-    
+    b = np.concatenate((Fr_flat, Fi_flat)) #right hand side of linearised problem as a 1D array  
     
     def callback(xk):
-        residual = np.linalg.norm(b - NR_operator * xk) / np.linalg.norm(b)
+        residual = np.linalg.norm(b - A * xk) / np.linalg.norm(b)
         print(residual)
-
-    result, info = bicgstab(NR_operator, b, x0 = psi0, rtol = .2, callback = callback) #perform algorithm to solve linear equation
+    
+    def callbackgmres(pr_norm): 
+        print(pr_norm)    
+        
+    #result, info = gmres(A, b, rtol = .1, callback = callbackgmres, callback_type= 'pr_norm') #perform algorithm to solve linear equation
+    result, info = lgmres(A, b, rtol = .1, callback = callback) #perform algorithm to solve linear equation
 
     if (info != 0):
         print('Linear solver did not converge. Info: ' + str(info) + '. Counter: ' + str(counter + 1))
@@ -494,11 +532,11 @@ def NR2D(psig, mu, g, omega, epsilon, counter = 0):
     deltapsii = np.reshape(result[2 * params.N**2:], newshape = (params.N, 2 * params.N), order = 'C')
     
     deltapsi = deltapsir + 1.0j * deltapsii #compute deltapsi
+    psinew = psig - deltapsi
     
-    psinew = psig - deltapsi 
-    
+    plot(deltapsi)
     #recur NR method with psinew, munew as next guess
-    return NR2D(psinew, mu, g, omega, epsilon, counter + 1)    
+    return NR2D(psinew, mu, g, omega, epsilon, counter = counter + 1)    
 
 #second try
 

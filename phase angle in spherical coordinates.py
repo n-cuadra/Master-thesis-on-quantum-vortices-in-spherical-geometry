@@ -27,16 +27,18 @@ def cart2sph(x, y, z):
     phi = np.arctan2(x,y)
     return theta, phi
 
-#define phase angle 
+#define some helper functions
 
 def num(theta, phi):
     return cot(theta/2) * np.sin(phi)
 
 def denom(theta, phi):
-    return cot(theta/2) * np.cos(phi) - cot(theta_plus/2)
+    return cot(theta/2) * np.cos(phi) + cot(theta_plus/2)
 
 def denom2(theta, phi):
-    return cot(theta/2) * np.cos(phi) - np.tan(theta_plus/2)
+    return cot(theta/2) * np.cos(phi) + np.tan(theta_plus/2)
+
+#define initial phase for two vortices on the sphere
 
 def phase(theta, phi):
     phase = np.arctan2(num(theta, phi), denom(theta, phi)) - np.arctan2(num(theta, phi), denom2(theta, phi))
@@ -62,15 +64,15 @@ ax = fig.add_subplot(1,1,1, projection='3d')
 ax.set_xlabel('x')
 ax.set_ylabel('y')
 ax.set_zlabel('z')
-ax.view_init(elev = 10, azim = -20)
+ax.view_init(elev = 10, azim = -200)
 
 p = ax.plot_surface(X, Y, Z, rstride=1, cstride=1, facecolors = colors, cmap = cm.seismic)
 
 
 
-fig.colorbar(p, location = 'left', shrink = 0.8, aspect = 8, label = r'$\theta$')
+fig.colorbar(p, location = 'left', shrink = 0.8, aspect = 8, label = r'$\gamma$')
 
 plt.tight_layout()
 plt.title('Initial phase of two vortices')
-plt.savefig('J:/Uni - Physik/Master/6. Semester/Masterarbeit/phase angle.pdf', bbox_inches='tight',  dpi = 300)
+plt.savefig('J:/Uni - Physik/Master/6. Semester/Masterarbeit/Media/phase angle.pdf', bbox_inches='tight',  dpi = 300)
 plt.show()

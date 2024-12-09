@@ -14,70 +14,79 @@ plt.rc('xtick', labelsize='x-small')
 plt.rc('ytick', labelsize='x-small')
 
 
-#initialize wavefunction. this will function as the first guess psig in the NR method
-psi = sgpe.generate_gridded_wavefunction(params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus, params.xi, params.bg_dens)
+#%%
+#psi = np.loadtxt('J:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/psi_-0.708.txt', delimiter= ',', dtype = np.complex128)
+
+psi = sgpe.IC_vortex_dipole(params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus, params.xi, params.bg_dens)
 particle_number = sgpe.get_norm(psi)
-print(particle_number)
+
 for _ in range(300):
-    psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number)
+    psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number, keep_phase = False)
+    
+    
 
-print(sgpe.get_norm(psi))
-#%%   
+omega = np.arange(0.708, 0.808, 0.01)
 
-psif = sgpe.NR(psi, params.g, params.omega, params.mu)
+angmom = np.zeros(len(omega), dtype = np.float64)
+energykin = np.zeros(len(omega), dtype = np.float64)
+energyint = np.zeros(len(omega), dtype = np.float64)
+energyrot = np.zeros(len(omega), dtype = np.float64)
 
-dens = np.abs(psif)**2
-phase = np.angle(psif)
-
-dens_coeffs = pysh.expand.SHExpandDH(griddh = dens, norm = 4, sampling = 2) #get sh coefficients for the density
-phase_coeffs = pysh.expand.SHExpandDH(griddh = phase, norm = 4, sampling = 2) #get sh coefficients for the phase
-
-dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance from the coefficient array for the density 
-phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance from the coefficient array for the phase
-
-dens_grid = dens_clm.expand() #create a SHGrid instance for the density 
-phase_grid = phase_clm.expand() #create a SHGrid instance for the phase
-
-gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
-density_cmap = cmocean.cm.thermal
-phase_cmap = cmocean.cm.balance
-
-fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw, figsize = (10, 6))
-
-#plt.suptitle('Time evolution of two vortices at $t = $' + str(time) + r'$\frac{m R^2}{\hbar}$', fontsize = 12)
-
-#subplot for denstiy
-
-dens_grid.plot(cmap = density_cmap, 
-               colorbar = 'right', 
-               cb_label = 'Density', 
-               xlabel = '', 
-               tick_interval = [90,45], 
-               tick_labelsize = 6, 
-               axes_labelsize = 7,
-               ax = axes[0],  
-               show = False)
-
-cb2 = axes[0].images[-1].colorbar
-cb2.mappable.set_clim(0., np.max(dens))
+for i in range(len(omega)):
+    psi = sgpe.NR2D(psi, mu = params.mu, g = params.g, omega = -omega[i], epsilon = 3e-4)
+    #np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/psi_' + str(-omega[i]) + '.txt', psi, delimiter = ',', header = 'NR solution for omega = ' + str(-omega[i]))
+    ekin, eint, erot = sgpe.get_energy(psi, params.g, -omega[i])
+    angmom[i] = sgpe.get_ang_momentum(psi)
+    energykin[i] = ekin 
+    energyint[i] = eint 
+    energyrot[i] = erot
+    #wf_path = 'J:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/wf_' + str(-omega[i]) + '.pdf'
+    #spectrum_path = 'J:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/spectrum_' + str(-omega[i]) + '.pdf'
+    wf_title = r'Wave function for $\tilde\omega =$ ' + str(-omega[i])
+    spectrum_title = r'Spectrum for $\tilde\omega =$ ' + str(-omega[i])
+    sgpe.plot(psi, spectrum_title = spectrum_title, wf_title = wf_title)
 
 
-#subplot for phase
-
-phase_grid.plot(cmap = phase_cmap, 
-                colorbar = 'right',
-                cb_label = 'Phase',
-                tick_interval = [90,45], 
-                cb_tick_interval = np.pi,
-                tick_labelsize = 6, 
-                axes_labelsize = 7, 
-                ax = axes[1],  
-                show = False)
+#np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/ekin.txt', energykin, delimiter = ',')
+#np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/eint.txt', energyint, delimiter = ',')
+#np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/erot.txt', energyrot, delimiter = ',')
+#np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/angular_momentum.txt', angmom, delimiter = ',')
 
 
-cb2 = axes[1].images[-1].colorbar
-cb2.mappable.set_clim(-np.pi, np.pi)
-cb2.ax.set_yticklabels([r'$-\pi$', 0, r'$+\pi$'])
+#%%
 
-print(sgpe.get_norm(psif))
+data = np.loadtxt('E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Measuring the angular velocities of vortices/omegacomplete.txt', delimiter = ',')
 
+omega = -data[0, 20:-2]
+thetaplus = data[1, 20:-2]
+
+energyrot = np.zeros(len(omega), dtype = np.float64)
+energyint = np.zeros(len(omega), dtype = np.float64)
+energykin = np.zeros(len(omega), dtype = np.float64)
+angmom = np.zeros(len(omega), dtype = np.float64)
+
+
+for i in range(len(omega)):
+    psi = np.sqrt(params.bg_dens) * sgpe.initial_magnitude(params.theta_grid, params.phi_grid, thetaplus[i], np.pi, np.pi - thetaplus[i], np.pi, params.xi) * np.exp(1.0j * sgpe.phase(params.theta_grid, params.phi_grid, thetaplus[i], np.pi, np.pi - thetaplus[i], np.pi))
+    particle_number = sgpe.get_norm(psi)
+
+
+    for _ in range(300):
+        psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number, keep_phase = False)
+        
+    psi = sgpe.NR2D(psi, params.mu, params.g, omega[i], epsilon = 5e-4)
+    #sgpe.plot(psi)
+    
+    ekin, eint, erot = sgpe.get_energy(psi, params.g, omega[i])
+    angmom[i] = sgpe.get_ang_momentum(psi)
+    energykin[i] = ekin
+    energyint[i] = eint
+    energyrot[i] = erot
+    
+np.savetxt('E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/ekin.txt', energykin, delimiter = ',')
+np.savetxt('E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/eint.txt', energyint, delimiter = ',')
+np.savetxt('E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/erot.txt', energyrot, delimiter = ',')
+np.savetxt('E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/angular_momentum.txt', angmom, delimiter = ',')
+
+
+    

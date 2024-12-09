@@ -15,10 +15,10 @@ plt.rc('ytick', labelsize='x-small')
 #parameters
 
 N = 256
-L = 64
+L = 15 * 2 * np.pi
 bg_dens = 1000
 dt = 1e-5
-vel = 0.1
+vel = 0.05
 
 #initialize grid
 dx = L / N
@@ -49,11 +49,31 @@ def Laplacian(psi):
     psi = np.fft.ifftn(- (kx**2 + ky**2) * psik)
     return psi
 
+
+def Laplacian_fd(psi):
+    laplace = np.zeros(shape = (N, N), dtype = psi.dtype)
+    for i in range(1, N - 1):
+        laplace[i,:] = (psi[i+1,:] - 2 * psi[i,:] + psi[i-1,:]) / dx**2
+        laplace[:,i] = (psi[:,i+1] - 2 * psi[:,i] + psi[:,i-1]) / dx**2
+    laplace[0,:] = (psi[1,:] - 2 * psi[0,:] + psi[-1,:]) / dx**2
+    laplace[-1,:] = (psi[0,:] - 2 * psi[-1,:] + psi[-2,:]) / dx**2
+    laplace[:,0] = (psi[:,1] - 2 * psi[:,0] + psi[:,-1]) / dx**2
+    laplace[:,-1] = (psi[:,0] - 2 * psi[:,-1] + psi[:,-2]) / dx**2
+    return laplace    
+ 
+def partialy(psi):
+    derivative = np.zeros(shape = (N, N), dtype = psi.dtype)
+    for i in range(N - 1):
+        derivative[:,i] = (psi[:,i+1] - psi[:,i])/dx
+    derivative[:,-1] = (psi[:,0] - psi[:,-1])/dx
+    return derivative
+
+   
 def partialx(psi):
     derivative = np.zeros(shape = (N, N), dtype = psi.dtype)
     for i in range(N - 1):
-        derivative[i,] = (psi[i + 1] - psi[i])/dx
-    derivative[-1,] = (psi[0,] - psi[-1])/dx
+        derivative[i,:] = (psi[i + 1,:] - psi[i,:])/dx
+    derivative[-1,:] = (psi[0,:] - psi[-1,:])/dx
     return derivative
 
 def timestep(psi, dt):
@@ -166,7 +186,7 @@ def NR(psi, vel, tol_NR, tol_ls, counter = 0):
     F_flat = np.ravel(F, order = 'C')
     b = np.concatenate((np.real(F_flat), np.imag(F_flat)))
     
-    A = LinearOperator(shape = (2*N**2, 2*N**2), matvec = lambda v: matvec(v, psi, vel), dtype = np.float64)
+    A = LinearOperator(shape = (2*N**2, 2*N**2), matvec = lambda v: matvecsimple(v, psi, vel), dtype = np.float64)
     
     def callback(xk):
         residual = np.linalg.norm(b - A * xk) / np.linalg.norm(b)
@@ -222,24 +242,28 @@ def plot(psi):
     
 psi1 = IC_Pade(X, Y, L / 2, L / 2 - 1 / (2 * vel), 1)
 psi2 = IC_Pade(X, Y, L / 2, L / 2 + 1 / (2 * vel), -1)
-
-psi = psi1 * psi2
+#psi3 = IC_Pade(X, Y, 3 * L / 4, L / 2 - 1 / (2 * vel), 1)
+#psi4 = IC_Pade(X, Y, 3 * L / 4, L / 2 + 1 / (2 * vel), -1)
+psi = psi1 * psi2 
 '''
 particle_number = get_particle_number(psi)
 
-for _ in range(300):
+for _ in range(600):
     psi = imaginary_timestep(psi, dt, particle_number)
     
 for _ in range(1000):
     psi = timestep(psi, dt)
-'''
+'''  
+
+
 plot(psi)
 
 
 #%%
-psi = NR(psi, vel = 0.1, tol_NR = 1e-5, tol_ls = 1e-4)
+psi = NR(psi, vel = -0.05, tol_NR = 1e-5, tol_ls = 1e-3)
 
 plot(psi)
+
 
 
 

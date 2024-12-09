@@ -3,9 +3,15 @@ import matplotlib.pyplot as plt
 import pyshtools as pysh
 import spherical_GPE_functions as sgpe
 import spherical_GPE_params as params
-
 from matplotlib import cm
+import scienceplots
 
+#set some parameters for plotting
+
+plt.style.use('science')
+plt.rcParams.update({'font.size': 7})
+plt.rc('xtick', labelsize='x-small')
+plt.rc('ytick', labelsize='x-small')
 
 #define the analytic expression for the bogoliubov dispersion (only the positive branch)
 
@@ -19,8 +25,8 @@ def bogoliubov_dispersion(l, m, omega, g, bg_dens, positive_sign):
 #initialize spherical harmonic coefficients
 clm = pysh.SHCoeffs.from_zeros(lmax = params.lmax, normalization = 'ortho', kind = 'complex') #initialize SHCoeffs instance with only zeros
 
-bg_dens = 10
-epsilon = 1e-4
+bg_dens = 100
+epsilon = 1e-9
 
 clm.set_coeffs(ls = 0, ms = 0, values = 2.0 * np.sqrt(np.pi * bg_dens)) #set the l=0 m=0 coefficient to 2 sqrt(pi) sqrt(condensate density)
 
@@ -53,11 +59,6 @@ for q in range(steps):
 
 #%%
 
-plt.rc('font', family='sans-serif')
-plt.rc('xtick', labelsize='x-small')
-plt.rc('ytick', labelsize='x-small')
-plt.rcParams['mathtext.fontset'] = 'cm'
-
 
 #coeffs_t = np.fft.ifftshift(coeffs_t, axes = 0)
 coeffs_omega = np.fft.fft(coeffs_t, axis = 0)
@@ -74,7 +75,7 @@ plt.xlabel(r'$l$')
 plt.ylabel(r'$\omega_{l,0}$')
 
 
-#plt.savefig('J:/Uni - Physik/Master/Masterarbeit/Media/spherical_bogoliubov_dispersion_1.pdf', dpi = 300)
+plt.savefig('E:/Uni - Physik/Master/Masterarbeit/Measurements/spherical_bogoliubov_dispersion_1.pdf', dpi = 300)
 plt.show()
 
 
@@ -99,13 +100,15 @@ plt.colorbar(mappable, label = r'$\log \ |\psi^{l}_0(\omega)|$')
 plt.xlabel(r'$l$')
 plt.ylabel(r'$\omega_{l,0}$')
 
-plt.legend(fontsize = 5)
-#plt.savefig('J:/Uni - Physik/Master/Masterarbeit/Media/spherical_bogoliubov_dispersion_2.pdf', dpi = 300)
+plt.legend(fontsize = 4, frameon = True, fancybox = True, framealpha = .4, loc = 'upper left')
+plt.savefig('E:/Uni - Physik/Master/Masterarbeit/Measurements/spherical_bogoliubov_dispersion_2.pdf', dpi = 300)
 plt.show()
 
 
+
+
 #%%
-ltest = 200
+ltest = 100
 m = np.linspace(0, params.lmax, params.lmax)
 omega_analytic_m_p = bogoliubov_dispersion(ltest, m, params.omega, params.g, bg_dens, True)
 omega_analytic_m_m = bogoliubov_dispersion(ltest, m, params.omega, params.g, bg_dens, False)
@@ -117,17 +120,17 @@ plt.plot(m, omega_analytic_m_m, 'w--', lw = 1)
 
 mappable = plt.imshow(data, cmap = cm.inferno, vmin = np.min(data), vmax = np.max(data), extent=[0, ltest, frequencies_ord.min(), frequencies_ord.max()], aspect = 'auto')
 
-plt.colorbar(mappable, label = r'$\log \ |\psi^{200}_m(\omega)|$')
+plt.colorbar(mappable, label = r'$\log \ |\psi^{100}_m(\omega)|$')
 
 plt.xlabel(r'$m$')
-plt.ylabel(r'$\omega_{200,m}$')
+plt.ylabel(r'$\omega_{100,m}$')
 
-plt.legend(fontsize = 5)
-#plt.savefig('J:/Uni - Physik/Master/Masterarbeit/Media/spherical_bogoliubov_dispersion_5.pdf', dpi = 300)
+plt.legend(fontsize = 4, framealpha = .4, frameon = True, fancybox = True)
+plt.savefig('E:/Uni - Physik/Master/Masterarbeit/Measurements/spherical_bogoliubov_dispersion_4.pdf', dpi = 300)
 plt.show()
 
 
 #%%
 
-clmt = pysh.SHCoeffs.from_array(coeffs_t[-1,:,:,:], normalization='ortho', lmax = lmax)
+clmt = pysh.SHCoeffs.from_array(coeffs_t[-1,:,:,:], normalization='ortho', lmax = params.lmax)
 clmt.plot_spectrum(unit = 'per_l', show = False)

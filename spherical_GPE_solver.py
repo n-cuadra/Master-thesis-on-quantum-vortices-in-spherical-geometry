@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import pyshtools as pysh
 import spherical_GPE_functions as sgpe
 import spherical_GPE_params as params
-import cmocean
 import time
 import scienceplots
 
@@ -16,21 +15,24 @@ plt.rc('ytick', labelsize='x-small')
 
 #initialize wavefunction
 
-psi = sgpe.generate_gridded_wavefunction(params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus, params.xi, params.bg_dens)
-particle_number = sgpe.get_norm(psi)
 
-for _ in range(300):
-    psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number)
+
+#alpha = 100
+#m = 1
+#Vp = alpha * np.sin(params.theta_grid)**m * np.cos(m * params.phi_grid)
 
 
 #psi = np.loadtxt('J:/Uni - Physik/Master/Masterarbeit/Initial conditions/initial condition NR.txt', delimiter = ',', dtype = np.complex128)
 
 
-#some stuff needed for plotting
 
-density_cmap = cmocean.cm.thermal
-phase_cmap = cmocean.cm.balance
-gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
+psi = np.sqrt(params.bg_dens) * sgpe.initial_magnitude(params.theta_grid, params.phi_grid, params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus, params.xi) * np.exp(1.0j * sgpe.phase(params.theta_grid, params.phi_grid, params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus))
+particle_number = sgpe.get_norm(psi)
+
+
+for _ in range(1000):
+    psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number, keep_phase = False)
+
 
 #SIMULATION
 ############################################################
@@ -38,7 +40,7 @@ gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 #after the first if statement follows the plotting routine to give a plot of the density and phase of the wave function and a plot of the spectrum
 
 conservative_number = 10#number of times you would like to record conserved quantities
-plot_number = 10 #number of times you would like to plot
+plot_number = 100 #number of times you would like to plot
 tracking_number = 20 #number of times you would like to track vortices
 
 t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of passed time in the simulation
@@ -62,82 +64,11 @@ for q in range(params.end + 1):
         time = round(params.dt * q, 10) #time that has passed at this point in the simulation
         
         
-        dens = np.abs(psi)**2 #calculate condensate density
-        phase_angle = np.angle(psi) #calculate phase of condensate
-        
-        
-        coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #get sh coefficients for the wave function     
-        dens_coeffs = pysh.expand.SHExpandDH(dens, norm = 4, sampling = 2) #get sh coefficients for the density
-        phase_coeffs = pysh.expand.SHExpandDH(phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
-        
-        clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum (at the bottom)
-        dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance from the coefficient array for the density 
-        phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance from the coefficient array for the phase
-
-        dens_grid = dens_clm.expand() #create a SHGrid instance for the density 
-        phase_grid = phase_clm.expand() #create a SHGrid instance for the phase
-        
-        #plot
-
-        fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw, figsize = (10, 6))
-        
-        plt.suptitle('Time evolution of two vortices at $t = $' + str(time) + r'$\frac{m R^2}{\hbar}$', fontsize = 12)
-
-        #subplot for denstiy
-
-        dens_grid.plot(cmap = density_cmap, 
-                       colorbar = 'right', 
-                       cb_label = 'Density', 
-                       xlabel = '', 
-                       tick_interval = [90,45], 
-                       tick_labelsize = 6, 
-                       axes_labelsize = 7,
-                       ax = axes[0],  
-                       show = False)
-        
-        cb2 = axes[0].images[-1].colorbar
-        cb2.mappable.set_clim(0., np.max(dens))
-        
-        
-        #subplot for phase
-
-        phase_grid.plot(cmap = phase_cmap, 
-                        colorbar = 'right',
-                        cb_label = 'Phase',
-                        tick_interval = [90,45], 
-                        cb_tick_interval = np.pi,
-                        tick_labelsize = 6, 
-                        axes_labelsize = 7, 
-                        ax = axes[1],  
-                        show = False)
-        
-       
-        cb2 = axes[1].images[-1].colorbar
-        cb2.mappable.set_clim(-np.pi, np.pi)
-        cb2.ax.set_yticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
-        
-        
-        #the following lines put a textbox with some simulation parameters into the density plot
-        
-        #textstr ='\n'.join((r'$\omega=%.1f$' % (params.omega_units, ) + 'Hz', r'$g = %.3f$' % (params.g, ) + r'$\hbar^2/m$'))
-        #props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        #axes[0].text(10, 80, textstr, fontsize=7, verticalalignment='top', bbox=props)
-        
-        filename = './wf_' + str(int(round(timestamp, 0))) + '_' + str(time) + '.pdf'
-
-        #plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
-        
-        #plot spectrum
-        
-        clm.plot_spectrum(unit = 'per_l', show = False)
-        
-        plt.title(r'Spectrum at $t = $' + str(time) + r'$\frac{m R^2}{\hbar}$')
-
-        filename = './spectrum_' + str(int(round(timestamp, 0))) + '_' + str(time) + '.pdf'
-
-        #plt.savefig(fname = filename, dpi = 300, bbox_inches = 'tight', format = 'pdf')
-        plt.show()
-        
+        wf_title = r'Time evolution of two vortices at $t = $ ' + str(time) + r'$\frac{m R^2}{\hbar}$'
+        spectrum_title = r'Spectrum at $t = $ ' + str(time) + r'$\frac{m R^2}{\hbar}$'
+        wf_path = './wf_' + str(int(round(timestamp, 0))) + '_' + str(time) + '.pdf'
+        spectrum_path = './spectrum_' + str(int(round(timestamp, 0))) + '_' + str(time) + '.pdf'
+        sgpe.plot(psi, wf_title = wf_title, spectrum_title = spectrum_title)
         
         
     if conserved_tracking:
@@ -177,9 +108,12 @@ for q in range(params.end + 1):
             vortex_tracker[3, index] = phi_v_minus
             
     
-    psi = sgpe.timestep_grid(psi, params.dt, params.g, params.omega)
+    psi = sgpe.timestep_grid(psi, dt = params.dt, g =  params.g, omega = 0, mu = params.mu)
+    #tstop = 1e-2
+    #if (params.dt * q <= tstop):
+        #psi = psi * np.exp(-1.0j * Vp * (1 - params.dt * q / tstop) * params.dt)
     
-   
+  
     
 
 #np.savetxt('./vortex_tracker_' + str(int(round(timestamp, 0))) + '.txt', vortex_tracker, delimiter = ',')

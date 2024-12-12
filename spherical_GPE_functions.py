@@ -409,7 +409,7 @@ def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_path
     if spectrum_path:
         plt.savefig(spectrum_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
         
-    '''
+    
     #plot 2d spectrum 
     
     clm.plot_spectrum2d(show = False)
@@ -419,7 +419,7 @@ def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_path
         
     if spectrum2d_path:
         plt.savefig(spectrum2d_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
-    '''
+    
     plt.show()
     return None
 
@@ -437,6 +437,32 @@ def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_path
 def Functional(psi, mu, g, omega):  
     F = - 0.5 * Laplacian(psi) + g * np.abs(psi)**2 * psi - 1.0j * omega * deriv_phi(psi) - mu * psi
     return F
+
+
+#function to plot sGPE functional
+def Fplot(F, particle_number):
+    fig, ax = plt.subplot_mosaic(
+        [['A', 'B']],
+        figsize = (10, 5)
+    )
+    plt.subplots_adjust(wspace=0.2, hspace=0.1)
+    func =  np.abs(F)**2 / particle_number
+    
+    mappable1 = ax['A'].pcolormesh(func, cmap = cmocean.cm.thermal)
+    ax['A'].set_xlabel(r'$\phi$')
+    ax['A'].set_ylabel(r'$\theta$')
+    ax['A'].set_yticks(ticks = (0, params.N//2, params.N), labels = ('180°', '90°', '0°'))
+    ax['A'].set_xticks(ticks = (0, params.N//2, params.N, 3 * params.N / 2, 2 * params.N), labels=('0°', '90°', '180°', '270°', '360°'))
+    fig.colorbar(mappable1, cmap = cmocean.cm.thermal, label = r'$|F|^2 / N$', ax = ax['A'], location = 'bottom')
+    
+    mappable2 = ax['B'].pcolormesh(np.log(func), cmap = cmocean.cm.thermal)
+    ax['B'].set_xlabel(r'$\phi$')
+    ax['B'].set_ylabel(r'$\theta$')
+    ax['B'].set_yticks(ticks = (0, params.N//2, params.N), labels = ('180°', '90°', '0°'))
+    ax['B'].set_xticks(ticks = (0, params.N//2, params.N, 3 * params.N / 2, 2 * params.N), labels=('0°', '90°', '180°', '270°', '360°'))
+    fig.colorbar(mappable2, cmap = cmocean.cm.thermal, label = r'$\log \left ( |F|^2 / N \right ) $', ax = ax['B'], location = 'bottom')
+
+    return None
 
 #matvec function that contains the information of the whole Jacobian to construct the linear operator, v is now a 1D array of length 4N^2 
 
@@ -481,18 +507,8 @@ def matvec_NR2D(v, psig, mu, g, omega):
 def NR2D(psig, mu, g, omega, epsilon,  counter = 0):
     F = Functional(psig, mu, g, omega) #compute Functional of psig
     F_coeffs = pysh.expand.SHExpandDHC(F, norm = 4, sampling = 2) #compute SH coeffs of functional
-    
-    Fclm = pysh.SHCoeffs.from_array(F_coeffs, normalization='ortho', lmax = params.lmax)
-    Fgrid = Fclm.expand()
-    Fgrid.plot(cmap = cmocean.cm.thermal, 
-                   colorbar = 'right', 
-                   cb_label = 'F', 
-                   tick_interval = [90,45], 
-                   tick_labelsize = 6, 
-                   axes_labelsize = 7,
-                   show = True)
     norm = np.sqrt(np.sum(np.abs(F_coeffs)**2) / get_norm(psig)) #compute norm of functional
-    
+    Fplot(F, get_norm(psig))
     
     print(counter)
     print(norm)
@@ -534,7 +550,11 @@ def NR2D(psig, mu, g, omega, epsilon,  counter = 0):
     deltapsi = deltapsir + 1.0j * deltapsii #compute deltapsi
     psinew = psig - deltapsi
     
-    plot(deltapsi)
+    wf_title= r'$\Delta \Psi$ for Interation: ' + str(counter + 1) 
+    spectrum2d_title = '2D Spectrum for Iteration: ' + str(counter + 1)
+    spectrum_title = 'Spectrum for Iteration: ' + str(counter + 1)
+    
+    plot(deltapsi, wf_title=wf_title, spectrum_title=spectrum_title, spectrum2d_title=spectrum2dtitle)
     #recur NR method with psinew, munew as next guess
     return NR2D(psinew, mu, g, omega, epsilon, counter = counter + 1)    
 

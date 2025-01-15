@@ -7,12 +7,12 @@ import cmocean
 
 num = 100
 
-theta_plus = np.linspace(0.01, 20*np.pi/180, num)
+theta_plus = np.linspace(np.deg2rad(1), np.deg2rad(85), num)
 
 
-ekin = np.zeros(shape = num, dtype = np.float64)
-erot = np.zeros(shape = num, dtype = np.float64)
-eint = np.zeros(shape = num, dtype = np.float64)
+etot = np.zeros(shape = num, dtype = np.float64)
+angmom = np.zeros(shape = num, dtype = np.float64)
+
 
 dens_cmap = cmocean.cm.thermal
 phase_cmap = cmocean.cm.balance
@@ -22,14 +22,16 @@ for k in range(num):
     particle_number = sgpe.get_norm(psi)
     for _ in range(300):
         psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number)
-        
-    kin, inter, rot = sgpe.get_energy(psi, params.g, 1.0)
-    ekin[k] = kin
-    eint[k] = inter
-    erot[k] = rot
+
+    phase = np.angle(psi)
     
-    coeffs = pysh.expand.SHExpandDH(griddh = np.abs(psi)**2, norm = 4, sampling = 2)
-    coeffs_phase = pysh.expand.SHExpandDH(griddh = np.angle(psi), norm = 4, sampling = 2)
+    kin, inter, rot = sgpe.get_energy(psi, params.g, 0.0)
+    angmom[k] = sgpe.get_ang_momentum(psi)
+    etot[k] = kin + inter
+
+    
+    coeffs = pysh.expand.SHExpandDH(np.abs(psi)**2, norm = 4, sampling = 2)
+    coeffs_phase = pysh.expand.SHExpandDH(phase, norm = 4, sampling = 2)
     clm_phase = pysh.SHCoeffs.from_array(coeffs_phase, normalization='ortho', lmax = params.lmax)
     clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = params.lmax)
     grid = clm.expand()
@@ -40,9 +42,9 @@ for k in range(num):
     print(k)           
 
 
-np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Recreating the results of Padavic et al/ekin20_highdens.txt', ekin, delimiter = ',')
-np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Recreating the results of Padavic et al/erot20_highdens.txt', erot, delimiter = ',')
-np.savetxt('J:/Uni - Physik/Master/Masterarbeit/Data/Recreating the results of Padavic et al/eint20_highdens.txt', eint, delimiter = ',')
+np.savetxt('./energy_full.txt', etot, delimiter = ',')
+np.savetxt('./angular_momentum_full.txt', angmom, delimiter = ',')
+
 
 
 #%%
@@ -55,7 +57,7 @@ plt.rcParams['mathtext.fontset'] = 'cm'
 theta_plus_degrees = 180 * theta_plus / np.pi
 
 
-plt.plot(theta_plus_degrees, eint + ekin + 0.5*erot,  linewidth = 0.8)
+plt.plot(theta_plus_degrees, eint,  linewidth = 0.8)
 
 
 

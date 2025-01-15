@@ -3,7 +3,7 @@ import pyshtools as pysh
 import spherical_GPE_params as params
 import cmocean
 import matplotlib.pyplot as plt
-from scipy.sparse.linalg import LinearOperator, gmres, lgmres, gcrotmk
+from scipy.sparse.linalg import LinearOperator, gmres, lgmres, gcrotmk, bicgstab
 
 import scienceplots
 
@@ -206,7 +206,7 @@ def timestep_coeffs(coeffs, dt, g, omega):
 
 #same timestep as above, except the input and output is the gridded data (includes a filter for dealiasing)
 
-def timestep_grid(psi, dt, g, omega, G = 0, mu = 0):
+def timestep_grid(psi, dt, g, omega, G = 0, mu = 0, filtering = True):
     psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
     if G:
         psi = psi * np.exp(-1.0j * G * (np.cos(params.theta_grid) + 1) * dt)
@@ -214,26 +214,27 @@ def timestep_grid(psi, dt, g, omega, G = 0, mu = 0):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     
     def step(i, l, m): #this function will be mutiplied entry wise with coeffs with entry indices i, l, m
-        return np.exp(- 1.0j * 0.5 * l * (l + 1) * params.dt ) * np.exp(- 1.0j * m * params.omega * params.dt * (-1.)**i)
+        return np.exp(- 1.0j * 0.5 * l * (l + 1) * params.dt ) * np.exp(- 1.0j * m * omega * params.dt * (-1.)**i)
     
     step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.complex128) #create array of same shape as coeffs with entries from step
     coeffs = coeffs * step_multiplier
     
     spectrum = pysh.spectralanalysis.spectrum(coeffs, normalization = 'ortho')
     
-    global lstart
-    if (spectrum[lstart] > spectrum[lstart - 10]):
-        lstart = lstart - 5
-        if (lstart < 2 * params.lmax // 3):
-            lstart = 2 * params.lmax // 3
-    
-    def exp_filter(i, l, m): #exponential filter
-        alpha = 0.01 
-        return np.exp(- alpha * (l - lstart))
-    
-    filter_multiplier = np.fromfunction(exp_filter, shape = np.shape(coeffs), dtype = np.float64) #create array from the filter with same shape as coeffs
-    coeffs[:, lstart:, :] = coeffs[:, lstart:, :] * filter_multiplier[:, lstart:, :] #apply filter from lstart onwards
-    
+    if filtering:
+        global lstart
+        if (spectrum[lstart] > spectrum[lstart - 10]):
+            lstart = lstart - 5
+            if (lstart < 2 * params.lmax // 3):
+                lstart = 2 * params.lmax // 3
+        
+        def exp_filter(i, l, m): #exponential filter
+            alpha = 0.01 
+            return np.exp(- alpha * (l - lstart))
+        
+        filter_multiplier = np.fromfunction(exp_filter, shape = np.shape(coeffs), dtype = np.float64) #create array from the filter with same shape as coeffs
+        coeffs[:, lstart:, :] = coeffs[:, lstart:, :] * filter_multiplier[:, lstart:, :] #apply filter from lstart onwards
+        
     
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     
@@ -328,7 +329,31 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
 
 
 
-############## PLOTTING ROUTINE (plots density and phase of wavefunction, plots spectrum of wavefunction) ############
+############## PLOTTING ROUTINES (plots density and phase of wavefunction, plots spectrum of wavefunction) ############
+
+def plot_2dspectrum(coeffs, path, title):
+    grid = np.concatenate((np.flip(coeffs[1,:,1:], axis = 1), coeffs[0, :, :]), axis = 1) #form a 2D array that has l as the first index and m going from -lmax to lmax in the second index ([0] = -lmax, [-1] = lmax)                   
+    spectrum = np.abs(grid)**2 #calculate absolute value squared to plot
+    spectrum[spectrum == 0.0] = np.nan #coefficients that don't exist are zero in the array, so set these to NaN
+
+    #create coordinate grid for pcolormesh
+    lmax = len(coeffs[0,:,0]) - 1
+    ls = np.arange(0, lmax + 1, 1)
+    ms = np.arange(- lmax, lmax + 1, 1)
+
+    #plot log of spectrum as pcolormesh
+    fig, ax = plt.subplots(1, 1, figsize = (7,5))
+    if title:
+        plt.suptitle(title, fontsize = 12)
+    mappable = ax.pcolormesh(ms, ls, np.log(spectrum), cmap = cmocean.cm.haline, vmin = np.nanmin(np.log(spectrum)),  vmax = np.nanmax(np.log(spectrum)))
+    ax.invert_yaxis()
+    fig.colorbar(mappable, label = 'Power per coefficient', ax = ax)
+    ax.set_xlabel(r'Spherical harmonic order $m$')
+    ax.set_ylabel(r'Spherical harmonic degree $l$')
+    if path:
+        fig.savefig(path, dpi = 300, bbox_inches = 'tight')
+    return None
+
 
 #psi: wavefunction to plot
 #wf_title: string of title of density + phase plot
@@ -337,88 +362,61 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
 #spectrum_path: string of path where to save spectrum plot
 #dpi: dpi of saved plots
 #ftype: filetype of saved plots
-def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_path = '', spectrum_path = '', spectrum2d_path = '', dpi = 300, ftype = 'pdf'):
+def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_path = '', spectrum_path = '', spectrum2d_path = '', dpi = 600, ftype = 'jpg'):
     
     dens = np.abs(psi)**2 #calculate condensate density
     phase_angle = np.angle(psi) #calculate phase of condensate
     
+    N = np.shape(psi)[0]
+    lmax = N//2 - 1    
     
-    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #get sh coefficients for the wave function     
-    dens_coeffs = pysh.expand.SHExpandDH(dens, norm = 4, sampling = 2) #get sh coefficients for the density
-    phase_coeffs = pysh.expand.SHExpandDH(phase_angle, norm = 4, sampling = 2) #get sh coefficients for the phase
+    #plot wave function
     
-    clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum (at the bottom)
-    dens_clm = pysh.SHCoeffs.from_array(dens_coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance from the coefficient array for the density 
-    phase_clm = pysh.SHCoeffs.from_array(phase_coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance from the coefficient array for the phase
+    fig, ax = plt.subplots(2, 1, figsize = (9, 8))
+    plt.subplots_adjust(hspace=0.2)
 
-    dens_grid = dens_clm.expand() #create a SHGrid instance for the density 
-    phase_grid = phase_clm.expand() #create a SHGrid instance for the phase
-    
-    #plot
-    
-    gridspec_kw = dict(height_ratios = (1, 1), hspace = 0.5)
 
-    fig, axes = plt.subplots(2, 1, gridspec_kw = gridspec_kw, figsize = (10, 6))
+    mappable1 = ax[0].pcolormesh(dens, cmap = cmocean.cm.thermal, vmin = np.min(dens), vmax = np.max(dens))
+    ax[0].invert_yaxis()
+    ax[0].set_ylabel(r'Latitude')
+    ax[0].set_yticks(ticks = (0, N//4, N//2, 3 * N // 4, N), labels = ('90°', '45°', '0°', '-45°', '-90°'))
+    ax[0].set_xticks(ticks = (0, N//2, N, 3 * N / 2, 2 * N), labels=('0°', '90°', '180°', '270°', '360°'))
+    fig.colorbar(mappable1, cmap = cmocean.cm.thermal, label = r'$nR^2$', ax = ax[0], location = 'right')
+
+    mappable2 = ax[1].pcolormesh(phase_angle, cmap = cmocean.cm.balance, vmin = -np.pi, vmax = np.pi)
+    ax[1].invert_yaxis()
+    ax[1].set_xlabel(r'Longitude')
+    ax[1].set_ylabel(r'Latitude')
+    ax[1].set_yticks(ticks = (0, N//4, N//2, 3 * N // 4, N), labels = ('90°', '45°', '0°', '-45°', '-90°'))
+    ax[1].set_xticks(ticks = (0, N//2, N, 3 * N / 2, 2 * N), labels=('0°', '90°', '180°', '270°', '360°'))
+    cb = fig.colorbar(mappable2, cmap = cmocean.cm.balance, label = r'Phase', ax = ax[1], location = 'right')
+    cb.ax.set_yticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
+    
     
     if wf_title:
-        plt.suptitle(wf_title, fontsize = 12)
-
-    #subplot for denstiy
-
-    dens_grid.plot(cmap = cmocean.cm.thermal, 
-                   colorbar = 'right', 
-                   cb_label = 'Density', 
-                   xlabel = '', 
-                   tick_interval = [90,45], 
-                   tick_labelsize = 6, 
-                   axes_labelsize = 7,
-                   ax = axes[0],  
-                   show = False)
-    
-    cb2 = axes[0].images[-1].colorbar
-    cb2.mappable.set_clim(np.min(dens), np.max(dens))
-    
-    
-    #subplot for phase
-
-    phase_grid.plot(cmap = cmocean.cm.balance, 
-                    colorbar = 'right',
-                    cb_label = 'Phase',
-                    tick_interval = [90,45], 
-                    cb_tick_interval = np.pi,
-                    tick_labelsize = 6, 
-                    axes_labelsize = 7, 
-                    ax = axes[1],  
-                    show = False)
-    
-   
-    cb2 = axes[1].images[-1].colorbar
-    cb2.mappable.set_clim(-np.pi, np.pi)
-    cb2.ax.set_yticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
+        fig.suptitle(wf_title, x = 0.46, y = 0.93, fontsize = 16)
     
     if wf_path:
-        plt.savefig(wf_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
+        fig.savefig(wf_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
     
     #plot spectrum
     
-    clm.plot_spectrum(unit = 'per_l', show = False)
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #get sh coefficients for the wave function
+    clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum (at the bottom)
+    fig, ax = plt.subplots(1, 1)
+    clm.plot_spectrum(unit = 'per_l', show = False, ax = ax)
+    ax.set_xlim(0, lmax)
     
     if spectrum_title:
-        plt.title(spectrum_title, fontsize = 12)
+        fig.suptitle(spectrum_title, fontsize = 12)
     
     if spectrum_path:
-        plt.savefig(spectrum_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
+        fig.savefig(spectrum_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
         
     
     #plot 2d spectrum 
     
-    clm.plot_spectrum2d(show = False)
-    
-    if spectrum2d_title:
-        plt.title(spectrum2d_title, fontsize = 12)
-        
-    if spectrum2d_path:
-        plt.savefig(spectrum2d_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
+    plot_2dspectrum(coeffs, spectrum2d_path, spectrum2d_title)
     
     plt.show()
     return None
@@ -440,29 +438,51 @@ def Functional(psi, mu, g, omega):
 
 
 #function to plot sGPE functional
-def Fplot(F, particle_number):
+def Fplot(F, particle_number, path = ''):
     fig, ax = plt.subplot_mosaic(
-        [['A', 'B']],
-        figsize = (10, 5)
+        [['A'],['B'],['C']],
+        figsize = (7, 9)
     )
-    plt.subplots_adjust(wspace=0.2, hspace=0.1)
+    plt.subplots_adjust(wspace=0.2, hspace=0.3)
     func =  np.abs(F)**2 / particle_number
     
-    mappable1 = ax['A'].pcolormesh(func, cmap = cmocean.cm.thermal)
+    mappable1 = ax['A'].pcolormesh(func, cmap = cmocean.cm.thermal, vmin = np.min(func), vmax = np.max(func))
+    ax['A'].invert_yaxis()
     ax['A'].set_xlabel(r'$\phi$')
     ax['A'].set_ylabel(r'$\theta$')
-    ax['A'].set_yticks(ticks = (0, params.N//2, params.N), labels = ('180°', '90°', '0°'))
+    ax['A'].set_yticks(ticks = (0, params.N//2, params.N), labels = ('0°', '90°', '180°'))
     ax['A'].set_xticks(ticks = (0, params.N//2, params.N, 3 * params.N / 2, 2 * params.N), labels=('0°', '90°', '180°', '270°', '360°'))
-    fig.colorbar(mappable1, cmap = cmocean.cm.thermal, label = r'$|F|^2 / N$', ax = ax['A'], location = 'bottom')
+    fig.colorbar(mappable1, cmap = cmocean.cm.thermal, label = r'$|F|^2 / N$', ax = ax['A'], location = 'right')
     
-    mappable2 = ax['B'].pcolormesh(np.log(func), cmap = cmocean.cm.thermal)
+    mappable2 = ax['B'].pcolormesh(np.log(func), cmap = cmocean.cm.thermal, vmin = np.min(np.log(func )), vmax = np.max(np.log(func)))
+    ax['B'].invert_yaxis()
     ax['B'].set_xlabel(r'$\phi$')
     ax['B'].set_ylabel(r'$\theta$')
-    ax['B'].set_yticks(ticks = (0, params.N//2, params.N), labels = ('180°', '90°', '0°'))
+    ax['B'].set_yticks(ticks = (0, params.N//2, params.N), labels = ('0°', '90°', '180°'))
     ax['B'].set_xticks(ticks = (0, params.N//2, params.N, 3 * params.N / 2, 2 * params.N), labels=('0°', '90°', '180°', '270°', '360°'))
-    fig.colorbar(mappable2, cmap = cmocean.cm.thermal, label = r'$\log \left ( |F|^2 / N \right ) $', ax = ax['B'], location = 'bottom')
-
+    fig.colorbar(mappable2, cmap = cmocean.cm.thermal, label = r'$\log \left ( |F|^2 / N \right ) $', ax = ax['B'], location = 'right')
+    
+    mappable3 = ax['C'].pcolormesh(np.angle(F), cmap = cmocean.cm.balance, vmin = -np.pi, vmax = np.pi)
+    ax['C'].invert_yaxis()
+    ax['C'].set_xlabel(r'$\phi$')
+    ax['C'].set_ylabel(r'$\theta$')
+    ax['C'].set_yticks(ticks = (0, params.N//2, params.N), labels = ('0°', '90°', '180°'))
+    ax['C'].set_xticks(ticks = (0, params.N//2, params.N, 3 * params.N / 2, 2 * params.N), labels=('0°', '90°', '180°', '270°', '360°'))
+    cb = fig.colorbar(mappable3, cmap = cmocean.cm.balance, label = r'Phase of $F$', ax = ax['C'], location = 'right')
+    cb.ax.set_yticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
+    
+    if path:
+        fig.savefig(path, dpi = 300, format = 'jpg', bbox_inches = 'tight')
     return None
+
+def resplot(residuals, counter, omega):
+    plt.plot(np.arange(0, counter + 1, 1), residuals[0: counter + 1], linestyle = 'None', marker = '.')
+    plt.xlabel('Iterations')
+    plt.ylabel('NR residual')
+    plt.yscale('log')
+    plt.savefig('E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/residuals_' + str(omega) + '.pdf', dpi = 300, bbox_inches = 'tight')
+    return None
+
 
 #matvec function that contains the information of the whole Jacobian to construct the linear operator, v is now a 1D array of length 4N^2 
 
@@ -504,19 +524,27 @@ def matvec_NR2D(v, psig, mu, g, omega):
 
 #full implementation of NR method
 
-def NR2D(psig, mu, g, omega, epsilon,  counter = 0):
+def NR2D(psig, mu, g, omega, epsilon,  counter = 0, maxcounter = 20):
+
     F = Functional(psig, mu, g, omega) #compute Functional of psig
     F_coeffs = pysh.expand.SHExpandDHC(F, norm = 4, sampling = 2) #compute SH coeffs of functional
     norm = np.sqrt(np.sum(np.abs(F_coeffs)**2) / get_norm(psig)) #compute norm of functional
-    Fplot(F, get_norm(psig))
-    
+    Fpath = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/F_' + str(omega) + '_' + str(counter) + '.jpg'
+    Fplot(F, get_norm(psig), path = Fpath)
+
     print(counter)
     print(norm)
-    #print(get_norm(psinew))
+
     
-    if (norm < epsilon): #if norm is smaller than epsilon * energy, convergence is achieved and psinew is returned
+    if (norm < epsilon): #if norm is smaller than epsilon, convergence is achieved and psinew is returned
         print('Iterations to convergence: ', counter)
         return psig
+    
+    #if maxcounter of iterations is reached, abort
+    if (counter == maxcounter):
+        print('Iterations to convergence: ', counter)
+        return psig
+        
     
     def mv(v):
         return matvec_NR2D(v, psig, mu, g, omega)
@@ -537,25 +565,29 @@ def NR2D(psig, mu, g, omega, epsilon,  counter = 0):
         print(pr_norm)    
         
     #result, info = gmres(A, b, rtol = .1, callback = callbackgmres, callback_type= 'pr_norm') #perform algorithm to solve linear equation
-    result, info = lgmres(A, b, rtol = .1, callback = callback) #perform algorithm to solve linear equation
+    result, info = lgmres(A, b, rtol = .09, callback = callback, maxiter = 10000) #perform algorithm to solve linear equation
 
     if (info != 0):
         print('Linear solver did not converge. Info: ' + str(info) + '. Counter: ' + str(counter + 1))
         return np.zeros(shape = (params.N, 2 * params.N), dtype = np.complex128)
     
-    #reshape result of bicgstab psi into real part and imaginary part of delta psi on the grid
+    #reshape result of linear solver psi into real part and imaginary part of delta psi on the grid
     deltapsir = np.reshape(result[:2 * params.N**2], newshape = (params.N, 2 * params.N), order = 'C')
     deltapsii = np.reshape(result[2 * params.N**2:], newshape = (params.N, 2 * params.N), order = 'C')
     
     deltapsi = deltapsir + 1.0j * deltapsii #compute deltapsi
     psinew = psig - deltapsi
     
-    wf_title= r'$\Delta \Psi$ for Interation: ' + str(counter + 1) 
+    #plot deltapsi
+    wf_title= r'$\Delta \Psi$ for Iteration: ' + str(counter + 1) 
     spectrum2d_title = '2D Spectrum for Iteration: ' + str(counter + 1)
     spectrum_title = 'Spectrum for Iteration: ' + str(counter + 1)
+    wf_path = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/wf_deltapsi' + str(omega) + '_' + str(counter + 1) + '.pdf'
+    spectrum_path = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/spectrum_deltapsi' + str(omega) + '_' + str(counter + 1) + '.pdf'
+    spectrum2d_path = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/spectrum2d_deltapsi' + str(omega) + '_' + str(counter + 1) + '.jpg'
+    plot(deltapsi, wf_title=wf_title, spectrum_title=spectrum_title, spectrum2d_title=spectrum2d_title, wf_path=wf_path, spectrum_path=spectrum_path, spectrum2d_path=spectrum2d_path)
     
-    plot(deltapsi, wf_title=wf_title, spectrum_title=spectrum_title, spectrum2d_title=spectrum2dtitle)
-    #recur NR method with psinew, munew as next guess
+    #recur NR method with psinew as next guess
     return NR2D(psinew, mu, g, omega, epsilon, counter = counter + 1)    
 
 #second try

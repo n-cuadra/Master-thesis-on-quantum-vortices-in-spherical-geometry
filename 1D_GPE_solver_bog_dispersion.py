@@ -53,15 +53,15 @@ for i in range(N):
     psi[i] = 1. + perturbation(x[i])
     
 
-#timestep with Runge Kutta 4 
+#timestep with split stepping
 
-def rk4_step(psi, dt):
-    k1 = 1.0j * 0.5 * second_deriv(psi) - 1.0j * g * np.abs(psi)**2 * psi
-    k2 = 1.0j * 0.5 * second_deriv(psi + dt * k1 * 0.5) - 1.0j * g * np.abs(psi + dt * k1 * 0.5)**2 * (psi + dt * k1 * 0.5)
-    k3 = 1.0j * 0.5 * second_deriv(psi + dt * k2 * 0.5) - 1.0j * g * np.abs(psi + dt * k2 * 0.5)**2 * (psi + dt * k2 * 0.5)
-    k4 = 1.0j * 0.5 * second_deriv(psi + dt * k3) - 1.0j * g * np.abs(psi + dt * k3)**2 * (psi + dt * k3)
-    
-    psi += (k1 + 2. * k2 + 2. * k3 + k4) * dt / 6.
+def split_step(psi, dt):
+    psi = psi[:-1] #cut off the last point which is the first point
+    psi_k = np.fft.fft(psi) #go to fourier space
+    psi_k *= np.exp(-1.0j * k**2 * dt * 0.5)  #perform kinetic step there
+    psi = np.fft.ifft(psi_k) #back to real space
+    psi = np.append(psi, psi[0]) #append the first value at the end again
+    psi *= np.exp(1.0j * g * np.abs(psi)**2 * dt) #perform nonlinear step here
     return psi
 
 
@@ -72,7 +72,7 @@ psi_x_t = np.zeros((steps, N), dtype = np.complex128) #initialize array in which
 
 for i in range(steps):
     psi_x_t[i, :] = psi
-    psi = rk4_step(psi, dt)
+    psi = split_step(psi, dt)
 
     
 psi_k_t = np.fft.fft(psi_x_t, axis = 1)

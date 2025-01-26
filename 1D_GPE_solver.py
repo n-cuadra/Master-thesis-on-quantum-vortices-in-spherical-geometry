@@ -96,21 +96,12 @@ def split_step(psi, dt):
     psi *= np.exp(1.0j * g * np.abs(psi)**2 * dt) #perform nonlinear step here
     return psi
 
-#timestep with Runge Kutta 4 
 
-def rk4_step(psi, dt):
-    k1 = 1.0j * 0.5 * second_deriv(psi) - 1.0j * g * np.abs(psi)**2 * psi
-    k2 = 1.0j * 0.5 * second_deriv(psi + dt * k1 * 0.5) - 1.0j * g * np.abs(psi + dt * k1 * 0.5)**2 * (psi + dt * k1 * 0.5)
-    k3 = 1.0j * 0.5 * second_deriv(psi + dt * k2 * 0.5) - 1.0j * g * np.abs(psi + dt * k2 * 0.5)**2 * (psi + dt * k2 * 0.5)
-    k4 = 1.0j * 0.5 * second_deriv(psi + dt * k3) - 1.0j * g * np.abs(psi + dt * k3)**2 * (psi + dt * k3)
-    
-    psi += (k1 + 2. * k2 + 2. * k3 + k4) * dt / 6.
-    return psi
 
 
 
 #run simulation
-'''
+
 end = 10000
 psi_x_t = np.zeros((end//10, N), dtype = np.complex128) #initialize array in which the wavefunction as a function of x AND t will be stored
 
@@ -118,10 +109,10 @@ for i in range(end):
     #if (i % 10 == 0): #every 10 timesteps append the time evolution to the array
         #ind = i // 10
         #psi_x_t[ind, :] = psi
-    psi = rk4_step(psi, dt)
+    psi = split_step(psi, dt)
    
 
-'''
+
 
 #plot function
 

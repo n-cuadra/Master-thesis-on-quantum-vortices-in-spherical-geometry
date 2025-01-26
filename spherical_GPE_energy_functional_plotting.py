@@ -55,7 +55,6 @@ axes[2].set_title(r'$\~\omega = $ -0.51')
 
 #fig.savefig('J:/Uni - Physik/Master/Masterarbeit/Media/etot.pdf', format = 'pdf', dpi = 300, bbox_inches = 'tight')
 
-#%%
 
 fig, ax = plt.subplots()
 ax.plot(theta_plus_degrees, eint, lw = 0.8)

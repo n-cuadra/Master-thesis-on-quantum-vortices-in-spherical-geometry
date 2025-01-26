@@ -362,7 +362,7 @@ def plot_2dspectrum(coeffs, path, title):
 #spectrum_path: string of path where to save spectrum plot
 #dpi: dpi of saved plots
 #ftype: filetype of saved plots
-def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_path = '', spectrum_path = '', spectrum2d_path = '', dpi = 600, ftype = 'jpg'):
+def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_subtitle = '', wf_path = '', spectrum_path = '', spectrum2d_path = '', dpi = 600, ftype = 'jpg'):
     
     dens = np.abs(psi)**2 #calculate condensate density
     phase_angle = np.angle(psi) #calculate phase of condensate
@@ -395,6 +395,9 @@ def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_path
     
     if wf_title:
         fig.suptitle(wf_title, x = 0.46, y = 0.93, fontsize = 16)
+        
+    if wf_subtitle:
+        fig.text(x = 0.42, y = 0.04, s = wf_subtitle, fontsize = 12, ha = 'left')
     
     if wf_path:
         fig.savefig(wf_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
@@ -577,7 +580,7 @@ def NR2D(psig, mu, g, omega, epsilon,  counter = 0, maxcounter = 20):
     
     deltapsi = deltapsir + 1.0j * deltapsii #compute deltapsi
     psinew = psig - deltapsi
-    
+    '''
     #plot deltapsi
     wf_title= r'$\Delta \Psi$ for Iteration: ' + str(counter + 1) 
     spectrum2d_title = '2D Spectrum for Iteration: ' + str(counter + 1)
@@ -586,87 +589,11 @@ def NR2D(psig, mu, g, omega, epsilon,  counter = 0, maxcounter = 20):
     spectrum_path = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/spectrum_deltapsi' + str(omega) + '_' + str(counter + 1) + '.pdf'
     spectrum2d_path = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/spectrum2d_deltapsi' + str(omega) + '_' + str(counter + 1) + '.jpg'
     plot(deltapsi, wf_title=wf_title, spectrum_title=spectrum_title, spectrum2d_title=spectrum2d_title, wf_path=wf_path, spectrum_path=spectrum_path, spectrum2d_path=spectrum2d_path)
-    
+    '''
     #recur NR method with psinew as next guess
     return NR2D(psinew, mu, g, omega, epsilon, counter = counter + 1)    
 
-#second try
 
-def A(v, psig, mug, g, omega):
-    #extract deltapsi, deltapsi*, deltamu from input vector v
-    deltapsi = v[:2 * params.N**2]
-    deltapsiconj = v[2 * params.N**2:-1]
-    deltamu = v[-1]
-    
-    #reshape deltapsi, deltapsi* onto the N x 2N grid
-    deltapsi_grid = np.reshape(deltapsi, newshape = (params.N, 2 * params.N), order = 'C')
-    deltapsiconj_grid = np.reshape(deltapsiconj, newshape = (params.N, 2 * params.N), order = 'C')
-    
-    #calculate the entries of A * v on the grid and then flatten them
-    A11_deltapsi = - 0.5 * Laplacian(deltapsi_grid) + 2 * g * np.abs(psig)**2 * deltapsi_grid - 1.0j * omega * deriv_phi(deltapsi_grid) - mug * deltapsi_grid
-    A12_deltapsiconj = g * psig**2 * deltapsiconj_grid
-    A13_deltamu = psig * deltamu
-    entry1 = np.ravel(A11_deltapsi + A12_deltapsiconj + A13_deltamu, order = 'C')
-    
-    A21_deltapsi = g * np.conj(psig)**2 * deltapsi_grid
-    A22_deltapsiconj = - 0.5 * Laplacian(deltapsiconj_grid) + 2 * g * np.abs(psig)**2 * deltapsiconj_grid + 1.0j * omega * deriv_phi(deltapsiconj_grid) - mug * deltapsiconj_grid
-    A23_deltamu = np.conj(psig) * deltamu
-    entry2 = np.ravel(A21_deltapsi + A22_deltapsiconj + A23_deltamu)
-    
-    coeffsg = pysh.expand.SHExpandDHC(psig, norm = 4, sampling = 2)
-    coeffs = pysh.expand.SHExpandDHC(deltapsi_grid, norm = 4, sampling = 2)
-    A31_deltapsi = - np.sum(np.conj(coeffsg) * coeffs)
-    A32_deltapsiconj = - np.sum(coeffsg * np.conj(coeffs))
-    entry3 = np.array([A31_deltapsi + A32_deltapsiconj])
-    
-    result = np.concatenate((entry1, entry2, entry3))
-    
-    return result
-
-def NR3D(psig, mug, g, omega, particle_number, epsilon, counter = 0):
-    F = Functional(psig, mug, g, omega) # compute F Functional
-    G = particle_number - get_norm(psig) #compute G functional
-    F_flat = np.ravel(F, order = 'C') #flatten F functional
-    b = np.concatenate((F_flat, np.conj(F_flat), np.array([G]))) #generate rhs of A * x = b
-    
-    F_coeffs = pysh.expand.SHExpandDHC(F, norm = 4, sampling = 2) #compute CH coeffs of functional
-    norm = np.sqrt(np.sum(np.abs(F_coeffs)**2)) #compute norm of functional    
-    
-    print(counter)
-    print(norm)
-    print(G)
-    
-    
-    if (norm < epsilon): #if norm is smaller than epsilon, convergence is achieved and psig is returned
-        print('Iterations to convergence: ', counter)
-        return psig, mug
-    
-    def mv(v):
-        return A(v, psig, mug, g, omega)
-    
-    NR_operator = LinearOperator(shape = (4 * params.N**2 + 1, 4 * params.N**2 + 1), 
-                                 matvec = mv, 
-                                 dtype = np.complex128)
-    
-    #create starting guess for bicgstab algorithm
-    psig_flat = np.ravel(psig, order = 'C') 
-    psi0 = np.concatenate((psig_flat, np.conj(psig_flat), np.array([mug])))
-
-    result, info = bicgstab(NR_operator, b, x0 = psi0, rtol = 0.1) #perform algorithm to solve linear equation
-    
-    if (info != 0):
-        print('Linear solver did not converge. Info: ' + str(info) + '. Counter: ' + str(counter + 1))
-        return np.zeros(shape = (params.N, 2 * params.N), dtype = np.complex128), 0
-    
-    #reshape result of bicgstab psi into real part and imaginary part of delta psi on the grid
-    deltapsi = np.reshape(result[:2 * params.N**2], newshape = (params.N, 2 * params.N), order = 'C')
-    deltamu = result[-1]
-    
-    psinew = psig - deltapsi 
-    munew = mug - np.real(deltamu)
-    
-    #recur NR method with psinew, munew as next guess
-    return NR3D(psinew, munew, g, omega, particle_number, epsilon, counter + 1)
 
 
 

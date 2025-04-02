@@ -1,3 +1,5 @@
+#This file contains all the functions I use for the numerical treatment of the Gross Pitaevskii equation in spherical coordinates
+
 import numpy as np
 import pyshtools as pysh
 import spherical_GPE_params as params
@@ -10,12 +12,12 @@ import scienceplots
 #set some parameters for plotting
 
 plt.style.use('science')
-plt.rcParams.update({'font.size': 7})
-plt.rc('xtick', labelsize='x-small')
-plt.rc('ytick', labelsize='x-small')
+plt.rcParams.update({'font.size': 12})
+plt.rcParams.update({'xtick.labelsize': 10})
+plt.rcParams.update({'ytick.labelsize': 10})
 
 
-lstart = params.lmax - 20 #sh degree above which filtering will start (initially)
+lstart = params.lmax - 20 #sh degree above which filtering will start (initially). This is defind here, because it needs to be adjusted globally. See the function timestep_grid for its use
 
 #cotangent
 
@@ -23,7 +25,6 @@ def cot(x):
     return np.tan(np.pi/2 - x)
 
 #transformation from spherical to cartesian coordinates
-
 
 def sph2cart(theta, phi):
     x = np.sin(theta) * np.cos(phi)
@@ -42,7 +43,8 @@ def cart2sph(x, y, z):
 
 ####################### INITIAL CONDITION #############################################################
 
-#initial phase angle of a vortex antivortex pair at the positions (theta_plus, phi_plus) and (theta_minus, phi_minus) on the grid
+#initial phase angle of a vortex antivortex dipole at the positions (theta_plus, phi_plus) and (theta_minus, phi_minus) on the grid.
+#The origin of this function is the stereographic projection of the phase of a vortex antivortex dipole in lfat 2D
 
 def phase(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus):
     denom1 = cot(theta/2) * np.sin(phi) - cot(theta_plus/2) * np.sin(phi_plus)
@@ -55,6 +57,9 @@ def phase(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus):
 
 
 #model initial magnitude of the wavefunction (a function that goes from 0 to 1 over the length scale of the healing length xi at the position of the vortices)
+#It's mathematical form is basically 1 - e^(l/xi), where l is the arc length separating a point on the sphere from the vortex core, xi is the healing length
+#This is not at all close to the actual density profile. It's only purpose is to accelerate the production of the vortex core via imaginary time evolution
+#depending on use case, it is sufficient to imprint the phase above
 
 def initial_magnitude(theta, phi, theta_plus, phi_plus, theta_minus, phi_minus, xi):
     
@@ -91,6 +96,8 @@ def one_vortex_magnitude(theta, phi, theta_v, phi_v, xi):
 
 
 #function that generates gridded data for a vortex dipole using the magnitude and phase above
+#xi: healing length
+#bg_dens: density far from vortices
 
 def IC_vortex_dipole(theta_plus, phi_plus, theta_minus, phi_minus, xi, bg_dens):
     phaseangle = phase(params.THETA, params.PHI, theta_plus, phi_plus, theta_minus, phi_minus)
@@ -102,7 +109,8 @@ def IC_vortex_dipole(theta_plus, phi_plus, theta_minus, phi_minus, xi, bg_dens):
 
 #################### DERIVATIVES ###############################
 
-#derivative with respect to azimuthal angle phi of a function psi
+#derivative with respect to azimuthal angle phi of a complex function psi
+#This uses the fact that spherical harmonics are eigenfunctions of this derivative with eigenvalues i*m
 
 def deriv_phi(psi):
     sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
@@ -115,7 +123,8 @@ def deriv_phi(psi):
     psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #back to real space, with the gridded data of the modified coefficients 
     return psi
 
-#angular laplacian of a function psi
+#angular laplacian of a complex function psi
+#This uses the fact that spherical harmonics are eigenfunctions of the angular laplacian with eigenvalues -l(l+1)
 
 def Laplacian(psi):
     sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
@@ -129,6 +138,7 @@ def Laplacian(psi):
     return psi
 
 #angular laplacian for a real valued function f
+#same as above, except the function is expanded in real spherical harmonics
 
 def Laplacianr(f):
     coeffs = pysh.expand.SHExpandDH(f, norm = 4, sampling = 2) 
@@ -143,31 +153,52 @@ def Laplacianr(f):
 
 ############################## CONSERVED QUANTITIES #####################################################
 
-#norm function, calculates particle number of the condensate
+#norm function, calculates particle number of the condensate with wave function psi
+#This first function calculates the particle number with spectral methods, using spherical harmonics
+#In some cases, a represantion in spherical harmonics might not be numerically accurate. Refer to get_norm2 then
 
 def get_norm(psi):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #sh coefficients of wavefunction
     norm = np.sum(np.abs(coeffs)**2) #sum over the absolute value squared of all coefficients
     return norm
 
-#calculate energy of condensate
+#This function calculates the particle number as well, but in real space
+#It's a bit longer, but it ensures the correct computation no matter the grid size
+
+def get_norm2(psi):
+    N = np.shape(psi)[0] #grid length
+    dangle = np.pi/N #grid point separation
+    theta, phi = np.linspace(0,  np.pi, N, endpoint = False), np.linspace(0, 2 * np.pi, 2 * N, endpoint = False) #create angular arrays
+    THETA, PHI = np.meshgrid(theta, phi, indexing = 'ij') #creat grid
+    norm = np.sum(dangle**2 * np.sin(THETA) * np.abs(psi)**2) #compute norm which formally is an integral over the whole sphere but transformed into a sum on the finitely sized grid
+    return norm
+
+#calculate energy of condensate with wave function psi with spectral methods
+#g: contact interaction strength in units of hbar^2/m
+#omega: frequency of external rotation in units of hbar/(mR^2)
+#G: gravitational constant in units of hbar^2/(m^2R^3). I've never used this, but implemented it nonetheless. So it is possible to calculate gravitational energy but currently I don't know to what end
+
 
 def get_energy(psi, g, omega, G = 0):
-    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
-    coeffs2 = pysh.expand.SHExpandDH(np.abs(psi)**2, norm = 4, sampling = 2)
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #sh coeffs of psi
+    coeffs2 = pysh.expand.SHExpandDH(np.abs(psi)**2, norm = 4, sampling = 2) #sh coeffs of |psi|^2 to calculate interaction energy
     
+    #functions to create multplier arrays
     def kinetic(i, l, m):
         return 0.5 * l * (l + 1) 
     def rotation(i, l, m):
         return omega * m * (-1.)**i
     
+    #create multiplier arrays 
     kinetic_multiplier = np.fromfunction(kinetic, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
     rotation_multiplier = np.fromfunction(rotation, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
     
+    #the respective energies are calculated as sums over the coefficients modified by the multipliers, this is a consequence of parseval's theorem for spherical harmonics
     ekin = np.sum(kinetic_multiplier * np.abs(coeffs)**2)
     erot = np.sum(rotation_multiplier * np.abs(coeffs)**2)
     eint = np.sum(0.5 * g * coeffs2**2)
     
+    #if G is nonzero, gravitational energy is also calculated and returned
     if G:
         coeffs_grav = pysh.expand.SHExpandDHC(psi * (np.cos(params.theta_grid) + 1), norm = 4, sampling = 2)
         eg = np.real(np.sum(G * coeffs * np.conj(coeffs_grav)))
@@ -175,60 +206,79 @@ def get_energy(psi, g, omega, G = 0):
     
     return ekin, eint, erot
 
-#calculate angular momentum of condensate in z direction
+#calculate angular momentum of condensate with wave function in z direction
 
 def get_ang_momentum(psi):
-    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
+    coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #sh coeffs of psi
     
+    #function to create multplier array
     def angmom(i, l, m):
         return m * (-1)**i
-    
+    #create multiplier arrays 
     mom_multiplier = np.fromfunction(angmom, shape = np.shape(coeffs), dtype = np.float64)
+    #again, angular momentum is calculated as a sum of modified coefficients, as per parseval's theorem
     mom = np.sum(mom_multiplier * np.abs(coeffs)**2)
     
     return mom
 
 ############################## TIME EVOLUTION ##############################################################
 
-#timestep with split stepping method where the sh coefficients are the input and output
+#The numerical method for time evolution is split stepping. There are three different functions for it.
+
+#This function performs one timestep and takes as input sh coefficients and returns the sh coefficients of the new wave function after the timestep.
+#It was rarely used and is therefore the most barebone
+#coeffs: array of sh coefficients
+#dt: size of timestep in units of mR^2/hbar
+#g: contact interaction strength in units of hbar^2/m
+#omega: frequency of external rotation in units of hbar/(mR^2)
 
 def timestep_coeffs(coeffs, dt, g, omega):
     def step(i, l, m): #this function will be mutiplied entry wise with coeffs with entry indices i, l, m
-        return np.exp(- 1.0j * 0.5 * l * (l + 1) * params.dt ) * np.exp(- 1.0j * m * params.omega * params.dt * (-1.)**i)
+        return np.exp(- 1.0j * 0.5 * l * (l + 1) * dt ) * np.exp(- 1.0j * m * omega * dt * (-1.)**i)
     
     step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.complex128) #create array of same shape as coeffs with entries from step
-    coeffs = coeffs * step_multiplier
+    coeffs = coeffs * step_multiplier #modify coeffs
     
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     psi = psi * np.exp(-1.0j * g * dt * np.abs(psi)**2) #timestep of nonlinear term
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #calculate expansion coefficients from the gridded data
     return coeffs
 
-#same timestep as above, except the input and output is the gridded data (includes a filter for dealiasing)
+#This function performs one timestep as well, but takes as input the wave function psi defined on the grid directly.
+#It has a bunch of additional features.
+#psi: Nx2N array containing the gridded data
+#dt: size of timestep in units of mR^2/hbar
+#g: contact interaction strength in units of hbar^2/m
+#omega: frequency of external rotation in units of hbar/(mR^2)
+#G: gravitational constant in units of hbar^2/(m^2R^3). If you want to include gravity in the time-evolution, set this to be non-zero. Default is zero
+#mu: chemical potential in units of hbar^2/(m R^2). May or may not be included. Default is not inclued (mu = 0)
+#gamma: Strength of dissipation. Dissipation is included in this function. Default is no dissipation (gamma = 0)
+#filtering: Boolean to turn on/off filtering during time evolution. Default is on (filtering = True). To combat aliasing, filtering may be included during the time evolution.
+#Filtering modifies the coefficients according to the exponential filter function exp(-alpha (l - lstart)), for all coefficients with l > lstart (see top of file). It is dynamically adjusted if the spectrum grows at the edges
 
-def timestep_grid(psi, dt, g, omega, G = 0, mu = 0, filtering = True):
-    psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
+def timestep_grid(psi, dt, g, omega, G = 0, mu = 0, gamma = 0, filtering = True):
+    psi = psi * np.exp(-(1.0j + gamma) * g * 0.5 * dt * np.abs(psi)**2) #half a timestep of nonlinear term
     if G:
         psi = psi * np.exp(-1.0j * G * (np.cos(params.theta_grid) + 1) * dt)
         
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     
     def step(i, l, m): #this function will be mutiplied entry wise with coeffs with entry indices i, l, m
-        return np.exp(- 1.0j * 0.5 * l * (l + 1) * params.dt ) * np.exp(- 1.0j * m * omega * params.dt * (-1.)**i)
+        return np.exp(- (1.0j + gamma) * 0.5 * l * (l + 1) * params.dt ) * np.exp(- (1.0j + gamma) * m * omega * params.dt * (-1.)**i)
     
     step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.complex128) #create array of same shape as coeffs with entries from step
     coeffs = coeffs * step_multiplier
     
-    spectrum = pysh.spectralanalysis.spectrum(coeffs, normalization = 'ortho')
-    
     if filtering:
+        spectrum = pysh.spectralanalysis.spectrum(coeffs, normalization = 'ortho') #calculate spectrum of coefficients 
         global lstart
+        #if spectrum grows at the edges, modify lstart in this fashion
         if (spectrum[lstart] > spectrum[lstart - 10]):
             lstart = lstart - 5
             if (lstart < 2 * params.lmax // 3):
                 lstart = 2 * params.lmax // 3
-        
-        def exp_filter(i, l, m): #exponential filter
+        #create function for exponential filter
+        def exp_filter(i, l, m): 
             alpha = 0.01 
             return np.exp(- alpha * (l - lstart))
         
@@ -239,15 +289,21 @@ def timestep_grid(psi, dt, g, omega, G = 0, mu = 0, filtering = True):
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     
     if mu:
-        psi = psi * np.exp(1.0j * dt * mu)
-    psi = psi * np.exp(-1.0j * g * 0.5 * dt * np.abs(psi)**2)
+        psi = psi * np.exp((1.0j + gamma) * dt * mu)
+    psi = psi * np.exp(-(1.0j + gamma) * g * 0.5 * dt * np.abs(psi)**2) #half a timestep of nonlinear term
     return psi
 
-#the same timestep, but for imaginary time on the grid
+#This function provides one timestep in imaginary time.
+#psi: Nx2N array containing the gridded data
+#dt: size of timestep in units of mR^2/hbar
+#g: contact interaction strength in units of hbar^2/m
+#omega: frequency of external rotation in units of hbar/(mR^2)
+#particle_number: This must be the particle number of psi. I do not included the chemical potential in my imaginary time evolution. Instead, the particle number is kept fixed
+#keep_phase: In some scenarios, you may want to keep the phase of psi constant and only subject the density to imaginary time evolution. If so, set keep_phase to True. Default is True.
 
 def imaginary_timestep_grid(psi, dt, g, omega, particle_number, keep_phase = True):
     phase = np.angle(psi)
-    psi = psi * np.exp(- 0.5 * g * dt * np.abs(psi)**2) #half timestep of nonlinear term
+    psi = psi * np.exp(- g * dt * np.abs(psi)**2) #half timestep of nonlinear term
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     
     def step(i, l, m):#this function will be mutiplied entry wise with coeffs with entry indices i, l, m
@@ -257,15 +313,18 @@ def imaginary_timestep_grid(psi, dt, g, omega, particle_number, keep_phase = Tru
     coeffs = coeffs * step_multiplier
     
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
-    psi = psi * np.exp(- 0.5 * g * dt * np.abs(psi)**2) #half timestep of nonlinear term
-    norm = get_norm(psi)
+    norm = get_norm2(psi)
     if keep_phase:
         psi = np.sqrt(particle_number) * np.abs(psi) * np.exp(1.0j * phase) / np.sqrt(norm)
     else:
         psi = np.sqrt(particle_number) * psi / np.sqrt(norm)
     return psi
 
-#filtering method to use outside of the timesteps
+#This is a seperate function that applies the exponential filter to the wave function psi, to be used outside of time evolution
+#psi: Nx2N array containing the gridded data
+#lstart: sh degree above which to apply the filter
+#alpha: strength of filter
+#k: exponent of filter
 
 def filtering(psi, lstart, alpha, k):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
@@ -283,7 +342,13 @@ def filtering(psi, lstart, alpha, k):
     
 ################### VORTEX TRACKING ############################
 
+#This function calculates the position of a vortex of the wave function psi near guessed position (theta_guess, phi_guess) using the Newton-Raphson method
+#counter: keeps track of how many iterations have been performed
+
 def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
+    N = np.shape(psi)[0] #calculate grid size
+    lmax = N//2 - 1 #calculate maximum sh degree
+    
     #expand sh coefficients of wave function, its real part and imaginary part
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) 
     coeffs_real = pysh.expand.SHExpandDH(np.real(psi), norm = 1, sampling = 2) 
@@ -302,11 +367,11 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     Jacobian = np.zeros((2,2), dtype = np.float64) # initialize jacobian
     
     #calculate the wave function and the Jacobian at position (theta_guess, phi_guess) in sh representation
-    psi_guess = np.sum(coeffs * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'complex', degrees = False))
-    Jacobian[0, 0] = np.sum(coeffs_theta_real * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
-    Jacobian[0, 1] = np.sum(coeffs_phi_real * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
-    Jacobian[1, 0] = np.sum(coeffs_theta_imag * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
-    Jacobian[1, 1] = np.sum(coeffs_phi_imag * pysh.expand.spharm(params.lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
+    psi_guess = np.sum(coeffs * pysh.expand.spharm(lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'complex', degrees = False))
+    Jacobian[0, 0] = np.sum(coeffs_theta_real * pysh.expand.spharm(lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
+    Jacobian[0, 1] = np.sum(coeffs_phi_real * pysh.expand.spharm(lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
+    Jacobian[1, 0] = np.sum(coeffs_theta_imag * pysh.expand.spharm(lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
+    Jacobian[1, 1] = np.sum(coeffs_phi_imag * pysh.expand.spharm(lmax, theta_guess, phi_guess, normalization = 'ortho', kind = 'real', degrees = False))
     
     if (np.abs(psi_guess)**2 > 0.1 * np.max(np.abs(psi)**2)): #if density at guessed position is larger than 10% of maximum, possibly cannot guarantee convergence, so the tracking must be aborted
         print('Guessed position too far away from vortex core. Try again!')
@@ -322,11 +387,9 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     
     #new coordinates
     theta_new = theta_guess - inverse_jacobian[0, 0] * np.real(psi_guess) - inverse_jacobian[0, 1] * np.imag(psi_guess)
-    phi_new = phi_guess - inverse_jacobian[1, 0] * np.real(psi_guess) - inverse_jacobian[1, 1] * np.imag(psi_guess)
-    
+    phi_new = phi_guess - inverse_jacobian[1, 0] * np.real(psi_guess) - inverse_jacobian[1, 1] * np.imag(psi_guess)    
     
     return vortex_tracker(psi, theta_new, phi_new, counter + 1) #recur the function with the new coordinates as the new guesses
-
 
 
 ############## PLOTTING ROUTINES (plots density and phase of wavefunction, plots spectrum of wavefunction) ############
@@ -342,14 +405,15 @@ def plot_2dspectrum(coeffs, path, title):
     ms = np.arange(- lmax, lmax + 1, 1)
 
     #plot log of spectrum as pcolormesh
-    fig, ax = plt.subplots(1, 1, figsize = (7,5))
+    fig, ax = plt.subplots(1, 1, figsize = (6,4))
     if title:
         plt.suptitle(title, fontsize = 12)
     mappable = ax.pcolormesh(ms, ls, np.log(spectrum), cmap = cmocean.cm.haline, vmin = np.nanmin(np.log(spectrum)),  vmax = np.nanmax(np.log(spectrum)))
     ax.invert_yaxis()
     fig.colorbar(mappable, label = 'Power per coefficient', ax = ax)
-    ax.set_xlabel(r'Spherical harmonic order $m$')
-    ax.set_ylabel(r'Spherical harmonic degree $l$')
+    ax.tick_params(axis='both', which='major', labelsize=13)
+    ax.set_xlabel(r'Spherical harmonic order $m$', fontsize = 15)
+    ax.set_ylabel(r'Spherical harmonic degree $l$', fontsize = 15)
     if path:
         fig.savefig(path, dpi = 300, bbox_inches = 'tight')
     return None
@@ -374,30 +438,36 @@ def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_subt
     
     fig, ax = plt.subplots(2, 1, figsize = (9, 8))
     plt.subplots_adjust(hspace=0.2)
-
-
-    mappable1 = ax[0].pcolormesh(dens, cmap = cmocean.cm.thermal, vmin = np.min(dens), vmax = np.max(dens))
+    
+    mappable1 = ax[0].pcolormesh(dens, cmap = cmocean.cm.thermal, vmin = 0, vmax = np.max(dens))
     ax[0].invert_yaxis()
-    ax[0].set_ylabel(r'Latitude')
+    ax[0].set_ylabel(r'Latitude', fontsize = 16)
     ax[0].set_yticks(ticks = (0, N//4, N//2, 3 * N // 4, N), labels = ('90°', '45°', '0°', '-45°', '-90°'))
     ax[0].set_xticks(ticks = (0, N//2, N, 3 * N / 2, 2 * N), labels=('0°', '90°', '180°', '270°', '360°'))
-    fig.colorbar(mappable1, cmap = cmocean.cm.thermal, label = r'$nR^2$', ax = ax[0], location = 'right')
-
+    ax[0].tick_params(axis='both', which='major', labelsize=14)
+    cbardens = fig.colorbar(mappable1, cmap = cmocean.cm.thermal, ax = ax[0], location = 'right')
+    cbardens.ax.set_ylabel(r'$n$ $\left[1/R^2\right]$', fontsize=16)
+    cbardens.ax.tick_params(labelsize=14)
+    
+    
     mappable2 = ax[1].pcolormesh(phase_angle, cmap = cmocean.cm.balance, vmin = -np.pi, vmax = np.pi)
     ax[1].invert_yaxis()
-    ax[1].set_xlabel(r'Longitude')
-    ax[1].set_ylabel(r'Latitude')
+    ax[1].set_xlabel(r'Longitude', fontsize = 16)
+    ax[1].set_ylabel(r'Latitude', fontsize = 16)
     ax[1].set_yticks(ticks = (0, N//4, N//2, 3 * N // 4, N), labels = ('90°', '45°', '0°', '-45°', '-90°'))
     ax[1].set_xticks(ticks = (0, N//2, N, 3 * N / 2, 2 * N), labels=('0°', '90°', '180°', '270°', '360°'))
-    cb = fig.colorbar(mappable2, cmap = cmocean.cm.balance, label = r'Phase', ax = ax[1], location = 'right')
-    cb.ax.set_yticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
+    ax[1].tick_params(axis='both', which='major', labelsize=14)
+    cbarphase = fig.colorbar(mappable2, cmap = cmocean.cm.balance, ax = ax[1], location = 'right')
+    cbarphase.ax.set_ylabel(r'Phase', fontsize=16)
+    cbarphase.ax.set_yticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
+    cbarphase.ax.tick_params(labelsize=14)
     
     
     if wf_title:
-        fig.suptitle(wf_title, x = 0.46, y = 0.93, fontsize = 16)
+        fig.suptitle(wf_title, x = 0.46, y = 0.93, fontsize = 18)
         
     if wf_subtitle:
-        fig.text(x = 0.42, y = 0.04, s = wf_subtitle, fontsize = 12, ha = 'left')
+        fig.text(x = 0.42, y = 0, s = wf_subtitle, fontsize = 14, ha = 'left')
     
     if wf_path:
         fig.savefig(wf_path, dpi = dpi, bbox_inches = 'tight', format = ftype)
@@ -405,10 +475,16 @@ def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_subt
     #plot spectrum
     
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #get sh coefficients for the wave function
-    clm = pysh.SHCoeffs.from_array(coeffs, normalization='ortho', lmax = params.lmax) #create a SHCoeffs instance for the wavefunction to plot spectrum (at the bottom)
+    spectrum = pysh.spectralanalysis.spectrum(coeffs, normalization = 'ortho') # creat array that contains the spectrum
     fig, ax = plt.subplots(1, 1)
-    clm.plot_spectrum(unit = 'per_l', show = False, ax = ax)
+    ls = np.arange(0, lmax + 1, 1)
+    ax.plot(ls, spectrum, label = 'Power per degree')
+    ax.grid()
+    ax.legend(fontsize = 10)
+    ax.set_yscale('log')
     ax.set_xlim(0, lmax)
+    ax.set_xlabel(r'Spherical harmonic degree $l$')
+    ax.set_ylabel('Power')
     
     if spectrum_title:
         fig.suptitle(spectrum_title, fontsize = 12)
@@ -532,7 +608,7 @@ def NR2D(psig, mu, g, omega, epsilon,  counter = 0, maxcounter = 20):
     F = Functional(psig, mu, g, omega) #compute Functional of psig
     F_coeffs = pysh.expand.SHExpandDHC(F, norm = 4, sampling = 2) #compute SH coeffs of functional
     norm = np.sqrt(np.sum(np.abs(F_coeffs)**2) / get_norm(psig)) #compute norm of functional
-    Fpath = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/F_' + str(omega) + '_' + str(counter) + '.jpg'
+    Fpath = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/F_' + str(np.round(mu, 0)) + '_' + str(np.round(omega, 4)) + '_' + str(counter) + '.jpg'
     Fplot(F, get_norm(psig), path = Fpath)
 
     print(counter)

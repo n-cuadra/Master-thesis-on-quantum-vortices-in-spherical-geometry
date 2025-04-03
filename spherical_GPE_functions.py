@@ -6,7 +6,6 @@ import spherical_GPE_params as params
 import cmocean
 import matplotlib.pyplot as plt
 from scipy.sparse.linalg import LinearOperator, gmres, lgmres, gcrotmk, bicgstab
-
 import scienceplots
 
 #set some parameters for plotting
@@ -112,28 +111,31 @@ def IC_vortex_dipole(theta_plus, phi_plus, theta_minus, phi_minus, xi, bg_dens):
 #derivative with respect to azimuthal angle phi of a complex function psi
 #This uses the fact that spherical harmonics are eigenfunctions of this derivative with eigenvalues i*m
 
+#first, initialize array that has the entries i*m to be multiplied with the coefficients
+def deriv_phi_multiplier(i, l, m):
+    return 1.0j * m * (-1.)**i
+
+deriv_phi_multiplier_array = np.fromfunction(deriv_phi_multiplier, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.complex128) #create array from the multiplier function. The sh coeffs have to be multiplied with i*m to get the derivative wrt phi
+
 def deriv_phi(psi):
     sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
-    
-    def multiplier(i, l, m):
-        return 1.0j * m * (-1.)**i
-    
-    multiplier_array = np.fromfunction(multiplier, shape = np.shape(sh_coeffs), dtype = np.complex128) #create array from the multiplier function. The sh coeffs have to be multiplied with i*m to get the derivative wrt phi
-    sh_coeffs = sh_coeffs * multiplier_array #modify coeffs with the above array
+    sh_coeffs = sh_coeffs * deriv_phi_multiplier_array #modify coeffs with the above array
     psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #back to real space, with the gridded data of the modified coefficients 
     return psi
 
 #angular laplacian of a complex function psi
 #This uses the fact that spherical harmonics are eigenfunctions of the angular laplacian with eigenvalues -l(l+1)
 
+#first, initialize array that has the entries -l(l+1) to be multiplied with the coefficients
+def laplacian_multiplier(i, l, m):
+    return - l * (l + 1)
+
+laplacian_multiplier_array = np.fromfunction(laplacian_multiplier, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64) #create array from the multiplier function. The sh coeffs have to be multiplied with -l(l+1) to get the laplacian
+
+
 def Laplacian(psi):
     sh_coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #expand sh coefficients of psi
-    
-    def multiplier(i, l, m):
-        return - l * (l + 1)
-    
-    multiplier_array = np.fromfunction(multiplier, shape = np.shape(sh_coeffs), dtype = np.float64) #create array from the multiplier function. The sh coeffs have to be multiplied with -l(l+1) to get the laplacian
-    sh_coeffs = sh_coeffs * multiplier_array #modify coeffs with the above array
+    sh_coeffs = sh_coeffs * laplacian_multiplier_array #modify coeffs with the above array
     psi = pysh.expand.MakeGridDHC(sh_coeffs, norm = 4, sampling = 2, extend = False) #back to real space, with the gridded data of the modified coefficients 
     return psi
 
@@ -142,11 +144,7 @@ def Laplacian(psi):
 
 def Laplacianr(f):
     coeffs = pysh.expand.SHExpandDH(f, norm = 4, sampling = 2) 
-    
-    def multiplier(i, l, m):
-        return - l * (l + 1)
-    multiplier_array = np.fromfunction(multiplier, shape = np.shape(coeffs), dtype = np.float64)
-    coeffs = coeffs * multiplier_array
+    coeffs = coeffs * laplacian_multiplier_array
     f = pysh.expand.MakeGridDH(coeffs, norm = 4, sampling = 2, extend = False)
     return f
 
@@ -162,7 +160,7 @@ def get_norm(psi):
     norm = np.sum(np.abs(coeffs)**2) #sum over the absolute value squared of all coefficients
     return norm
 
-#This function calculates the particle number as well, but in real space
+#This function calculates the particle number as well, but in real space without spectral methods
 #It's a bit longer, but it ensures the correct computation no matter the grid size
 
 def get_norm2(psi):
@@ -178,24 +176,24 @@ def get_norm2(psi):
 #omega: frequency of external rotation in units of hbar/(mR^2)
 #G: gravitational constant in units of hbar^2/(m^2R^3). I've never used this, but implemented it nonetheless. So it is possible to calculate gravitational energy but currently I don't know to what end
 
+#functions to create multplier arrays
+def kinetic_multiplier(i, l, m):
+    return 0.5 * l * (l + 1) 
+def angmom_multiplier(i, l, m):
+    return m * (-1.)**i
+ 
+#create multiplier arrays 
+kinetic_multiplier_array = np.fromfunction(kinetic_multiplier, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
+angmom_multiplier_array = np.fromfunction(angmom_multiplier, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
+
 
 def get_energy(psi, g, omega, G = 0):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #sh coeffs of psi
     coeffs2 = pysh.expand.SHExpandDH(np.abs(psi)**2, norm = 4, sampling = 2) #sh coeffs of |psi|^2 to calculate interaction energy
     
-    #functions to create multplier arrays
-    def kinetic(i, l, m):
-        return 0.5 * l * (l + 1) 
-    def rotation(i, l, m):
-        return omega * m * (-1.)**i
-    
-    #create multiplier arrays 
-    kinetic_multiplier = np.fromfunction(kinetic, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
-    rotation_multiplier = np.fromfunction(rotation, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
-    
     #the respective energies are calculated as sums over the coefficients modified by the multipliers, this is a consequence of parseval's theorem for spherical harmonics
-    ekin = np.sum(kinetic_multiplier * np.abs(coeffs)**2)
-    erot = np.sum(rotation_multiplier * np.abs(coeffs)**2)
+    ekin = np.sum(kinetic_multiplier_array * np.abs(coeffs)**2)
+    erot = omega * np.sum(angmom_multiplier_array * np.abs(coeffs)**2)
     eint = np.sum(0.5 * g * coeffs2**2)
     
     #if G is nonzero, gravitational energy is also calculated and returned
@@ -211,19 +209,29 @@ def get_energy(psi, g, omega, G = 0):
 def get_ang_momentum(psi):
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #sh coeffs of psi
     
-    #function to create multplier array
-    def angmom(i, l, m):
-        return m * (-1)**i
-    #create multiplier arrays 
-    mom_multiplier = np.fromfunction(angmom, shape = np.shape(coeffs), dtype = np.float64)
-    #again, angular momentum is calculated as a sum of modified coefficients, as per parseval's theorem
-    mom = np.sum(mom_multiplier * np.abs(coeffs)**2)
+    #again, angular momentum is calculated as a sum of modified coefficients
+    mom = np.sum(angmom_multiplier_array * np.abs(coeffs)**2)
     
     return mom
 
 ############################## TIME EVOLUTION ##############################################################
 
 #The numerical method for time evolution is split stepping. There are three different functions for it.
+#The way that I do it is creating an array that is multiplied with the array storing the sh coeffs and thereby performing the kinetic and rotational timestep
+
+def timestep_multiplier(dt, omega, gamma = 0):
+    def step(i, l, m):
+        return np.exp(- (1.0j + gamma) * 0.5 * l * (l + 1) * params.dt ) * np.exp(- (1.0j + gamma) * m * omega * params.dt * (-1.)**i)
+
+    multiplier_array = np.fromfunction(step, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.complex128) #create array of same shape as coeffs with entries from step
+    return multiplier_array
+
+def imaginary_timestep_multiplier(dt, omega):
+    def step(i, l, m):#this function will be mutiplied entry wise with coeffs with entry indices i, l, m
+        return np.exp(- 0.5 * l * (l + 1) * dt ) * np.exp(- m * omega * dt * (-1.)**i)
+    
+    multiplier_array = np.fromfunction(step, shape = (2, params.lmax + 1, params.lmax + 1), dtype = np.float64)
+    return multiplier_array
 
 #This function performs one timestep and takes as input sh coefficients and returns the sh coefficients of the new wave function after the timestep.
 #It was rarely used and is therefore the most barebone
@@ -232,13 +240,9 @@ def get_ang_momentum(psi):
 #g: contact interaction strength in units of hbar^2/m
 #omega: frequency of external rotation in units of hbar/(mR^2)
 
-def timestep_coeffs(coeffs, dt, g, omega):
-    def step(i, l, m): #this function will be mutiplied entry wise with coeffs with entry indices i, l, m
-        return np.exp(- 1.0j * 0.5 * l * (l + 1) * dt ) * np.exp(- 1.0j * m * omega * dt * (-1.)**i)
-    
-    step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.complex128) #create array of same shape as coeffs with entries from step
-    coeffs = coeffs * step_multiplier #modify coeffs
-    
+
+def timestep_coeffs(coeffs, dt, g, multiplier_array):
+    coeffs = coeffs * multiplier_array #modify coeffs
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     psi = psi * np.exp(-1.0j * g * dt * np.abs(psi)**2) #timestep of nonlinear term
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2) #calculate expansion coefficients from the gridded data
@@ -256,18 +260,14 @@ def timestep_coeffs(coeffs, dt, g, omega):
 #filtering: Boolean to turn on/off filtering during time evolution. Default is on (filtering = True). To combat aliasing, filtering may be included during the time evolution.
 #Filtering modifies the coefficients according to the exponential filter function exp(-alpha (l - lstart)), for all coefficients with l > lstart (see top of file). It is dynamically adjusted if the spectrum grows at the edges
 
-def timestep_grid(psi, dt, g, omega, G = 0, mu = 0, gamma = 0, filtering = True):
+def timestep_grid(psi, dt, g, multiplier_array, G = 0, mu = 0, gamma = 0, filtering = True):
     psi = psi * np.exp(-(1.0j + gamma) * g * 0.5 * dt * np.abs(psi)**2) #half a timestep of nonlinear term
     if G:
         psi = psi * np.exp(-1.0j * G * (np.cos(params.theta_grid) + 1) * dt)
         
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     
-    def step(i, l, m): #this function will be mutiplied entry wise with coeffs with entry indices i, l, m
-        return np.exp(- (1.0j + gamma) * 0.5 * l * (l + 1) * params.dt ) * np.exp(- (1.0j + gamma) * m * omega * params.dt * (-1.)**i)
-    
-    step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.complex128) #create array of same shape as coeffs with entries from step
-    coeffs = coeffs * step_multiplier
+    coeffs = coeffs * multiplier_array
     
     if filtering:
         spectrum = pysh.spectralanalysis.spectrum(coeffs, normalization = 'ortho') #calculate spectrum of coefficients 
@@ -301,16 +301,12 @@ def timestep_grid(psi, dt, g, omega, G = 0, mu = 0, gamma = 0, filtering = True)
 #particle_number: This must be the particle number of psi. I do not included the chemical potential in my imaginary time evolution. Instead, the particle number is kept fixed
 #keep_phase: In some scenarios, you may want to keep the phase of psi constant and only subject the density to imaginary time evolution. If so, set keep_phase to True. Default is True.
 
-def imaginary_timestep_grid(psi, dt, g, omega, particle_number, keep_phase = True):
+def imaginary_timestep_grid(psi, dt, g, particle_number, multiplier_array, keep_phase = True):
     phase = np.angle(psi)
     psi = psi * np.exp(- g * dt * np.abs(psi)**2) #half timestep of nonlinear term
     coeffs = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
     
-    def step(i, l, m):#this function will be mutiplied entry wise with coeffs with entry indices i, l, m
-        return np.exp(- 0.5 * l * (l + 1) * dt ) * np.exp(- m * omega * dt * (-1.)**i)
-    
-    step_multiplier = np.fromfunction(step, shape = np.shape(coeffs), dtype = np.float64)
-    coeffs = coeffs * step_multiplier
+    coeffs = coeffs * multiplier_array
     
     psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False) #create gridded data in (N, 2*N) array from coeffs
     norm = get_norm2(psi)
@@ -392,9 +388,13 @@ def vortex_tracker(psi, theta_guess, phi_guess, counter = 0):
     return vortex_tracker(psi, theta_new, phi_new, counter + 1) #recur the function with the new coordinates as the new guesses
 
 
-############## PLOTTING ROUTINES (plots density and phase of wavefunction, plots spectrum of wavefunction) ############
+############## PLOTTING ROUTINES ############
 
-def plot_2dspectrum(coeffs, path, title):
+#function to plot 2d spectrum of a given function with sh coefficients stored in the array coeffs
+#path: string, optional parameter to save the spectrum to path
+#title: string, optional parameter include a title in the plot
+
+def plot_2dspectrum(coeffs, path = '', title = ''):
     grid = np.concatenate((np.flip(coeffs[1,:,1:], axis = 1), coeffs[0, :, :]), axis = 1) #form a 2D array that has l as the first index and m going from -lmax to lmax in the second index ([0] = -lmax, [-1] = lmax)                   
     spectrum = np.abs(grid)**2 #calculate absolute value squared to plot
     spectrum[spectrum == 0.0] = np.nan #coefficients that don't exist are zero in the array, so set these to NaN
@@ -422,8 +422,10 @@ def plot_2dspectrum(coeffs, path, title):
 #psi: wavefunction to plot
 #wf_title: string of title of density + phase plot
 #spectrum_title: string of title of spectrum plot
+#spectrum2d_title: string of title of 2d spectrum plot
 #wf_path: string of path where to save density + phase plot
 #spectrum_path: string of path where to save spectrum plot
+#spectrum_path: string of path where to save 2d spectrum plot
 #dpi: dpi of saved plots
 #ftype: filetype of saved plots
 def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_subtitle = '', wf_path = '', spectrum_path = '', spectrum2d_path = '', dpi = 600, ftype = 'jpg'):
@@ -504,19 +506,22 @@ def plot(psi, wf_title = '', spectrum_title = '', spectrum2d_title = '', wf_subt
 ################################### NEWTON RAPHSON ######################################################################
 
 #solve the linear system A * x = b
-#the scipy linalg methods require that all vectors are in 1D form, therefore v is a 1D array of length 4N^2 + 1, 2 times all the points in the grid + term for particle conservation
+#the scipy linalg methods require that all vectors are in 1D form, therefore v is a 1D array of length 4N^2, 2 times all the points in the grid 
 #the real and imaginary part of delta psi are arrays of length 2N^2
 #and I can reshape them onto the N x 2N grid to perform the effects of the linear operators in the Jacobian
 #NR2D is for the NR method where the chemical potential is kept constant
-#NR3D includes the chemical potential as parameter to be varied, keeping the particle number constant
+
 
 #sGPE functional
+#this will be the used to calculate the residual of the NR method
 def Functional(psi, mu, g, omega):  
     F = - 0.5 * Laplacian(psi) + g * np.abs(psi)**2 * psi - 1.0j * omega * deriv_phi(psi) - mu * psi
     return F
 
 
-#function to plot sGPE functional
+#function to plot sGPE functional |F|^2 / particle_number, its logarithm and the phase of F
+#path: string of path where to save the plot
+
 def Fplot(F, particle_number, path = ''):
     fig, ax = plt.subplot_mosaic(
         [['A'],['B'],['C']],
@@ -554,6 +559,10 @@ def Fplot(F, particle_number, path = ''):
         fig.savefig(path, dpi = 300, format = 'jpg', bbox_inches = 'tight')
     return None
 
+
+#function to plot the residuals as a function of the iteration number 
+#currently unused and untested
+
 def resplot(residuals, counter, omega):
     plt.plot(np.arange(0, counter + 1, 1), residuals[0: counter + 1], linestyle = 'None', marker = '.')
     plt.xlabel('Iterations')
@@ -564,37 +573,39 @@ def resplot(residuals, counter, omega):
 
 
 #matvec function that contains the information of the whole Jacobian to construct the linear operator, v is now a 1D array of length 4N^2 
-
-def matvecsimple(v, psig, mu, g, omega):
-    deltapsir = v[:2 * params.N**2] #first 2N^2 entries correspond to real part of delta psi
-    deltapsii = v[2 * params.N**2:] #second 2N^2 entries correspond to imaginary part of delta psi
-    
-    
-    deltapsi = deltapsir + 1j * deltapsii
-    deltapsi_grid = np.reshape(deltapsi, newshape = (params.N, 2 * params.N), order = 'C')
-    
-    
-    yy = -0.5 * Laplacian(deltapsi_grid) + g * (2 * np.abs(psig)**2 + psig**2) * deltapsi_grid - mu * deltapsi_grid - 1j * omega * deriv_phi(deltapsi_grid)
-    
-    yy = np.ravel(yy, order = 'C')
-
-    return np.concatenate((np.real(yy), np.imag(yy)))
+#psig: initial guess for NR method, must have shape (N, 2N)
+#mu: dimensionless chemical potential
+#g: dimensionless interaction parameter
+#omega: dimensionless rotation frequency
 
 
 def matvec_NR2D(v, psig, mu, g, omega):
     deltapsir = v[:2 * params.N**2] #first 2N^2 entries correspond to real part of delta psi
     deltapsii = v[2 * params.N**2:] #second 2N^2 entries correspond to imaginary part of delta psi
     
+    #reshape to the grid shape
     deltapsir_grid = np.reshape(deltapsir, newshape = (params.N, 2 * params.N), order = 'C')
     deltapsii_grid = np.reshape(deltapsii, newshape = (params.N, 2 * params.N), order = 'C')
     
+    #create sh coeffs
+    coeffs_deltapsir = pysh.expand.SHExpandDHC(deltapsir_grid, norm = 4, sampling = 2)
+    coeffs_deltapsii = pysh.expand.SHExpandDHC(deltapsii_grid, norm = 4, sampling = 2)
+    
+    #calculate Laplacian of deltapsir and deltapsii
+    laplacian_deltapsir = pysh.expand.MakeGridDHC(coeffs_deltapsir * laplacian_multiplier_array, norm = 4, sampling = 2, extend = False)
+    laplacian_deltapsii = pysh.expand.MakeGridDHC(coeffs_deltapsii * laplacian_multiplier_array, norm = 4, sampling = 2, extend = False)
+    
+    #calculate derivate wrt phi of deltapsir and deltapsii    
+    deriv_deltapsir = pysh.expand.MakeGridDHC(coeffs_deltapsir * deriv_phi_multiplier_array, norm = 4, sampling = 2, extend = False)
+    deriv_deltapsii = pysh.expand.MakeGridDHC(coeffs_deltapsii * deriv_phi_multiplier_array, norm = 4, sampling = 2, extend = False)
+    
     #calculate the entries of A * v on the grid and then flatten them
-    A11_deltapsir = - 0.5 * Laplacianr(deltapsir_grid) + g * (3 * np.real(psig)**2 + np.imag(psig)**2) * deltapsir_grid - mu * deltapsir_grid
-    A12_deltapsii = 2 * g * np.real(psig) * np.imag(psig) * deltapsii_grid + omega * np.real(deriv_phi(deltapsii_grid))
+    A11_deltapsir = - 0.5 * np.real(laplacian_deltapsir) + g * (3 * np.real(psig)**2 + np.imag(psig)**2) * deltapsir_grid - mu * deltapsir_grid
+    A12_deltapsii = 2 * g * np.real(psig) * np.imag(psig) * deltapsii_grid + omega * np.real(deriv_deltapsii)
     entry1 = np.ravel(A11_deltapsir + A12_deltapsii, order = 'C')
     
-    A21_deltapsir = 2 * g * np.real(psig) * np.imag(psig) * deltapsir_grid - omega * np.real(deriv_phi(deltapsir_grid))
-    A22_deltapsii = - 0.5 * Laplacianr(deltapsii_grid) + g * (3 * np.imag(psig)**2 + np.real(psig)**2) * deltapsii_grid - mu * deltapsii_grid
+    A21_deltapsir = 2 * g * np.real(psig) * np.imag(psig) * deltapsir_grid - omega * np.real(deriv_deltapsir)
+    A22_deltapsii = - 0.5 * np.real(laplacian_deltapsii) + g * (3 * np.imag(psig)**2 + np.real(psig)**2) * deltapsii_grid - mu * deltapsii_grid
     entry2 = np.ravel(A21_deltapsir + A22_deltapsii, order = 'C')
     
     result = np.concatenate((entry1, entry2))
@@ -602,14 +613,21 @@ def matvec_NR2D(v, psig, mu, g, omega):
     return result
 
 #full implementation of NR method
+#psig: initial guess for NR method, must have shape (N, 2N)
+#mu: dimensionless chemical potential
+#g: dimensionless interaction parameter
+#omega: dimensionless rotation frequency
+#epsilon: tolerance of NR method. Once residual falls below epsilon, the method has converged
+#counter: integer to count the number of iterations
+#maxcounter: maximum number of iterations after which the procedure will be aborted
 
-def NR2D(psig, mu, g, omega, epsilon,  counter = 0, maxcounter = 20):
+def NR2D(psig, mu, g, omega, epsilon, Fpath = '', counter = 0, maxcounter = 20):
 
     F = Functional(psig, mu, g, omega) #compute Functional of psig
     F_coeffs = pysh.expand.SHExpandDHC(F, norm = 4, sampling = 2) #compute SH coeffs of functional
     norm = np.sqrt(np.sum(np.abs(F_coeffs)**2) / get_norm(psig)) #compute norm of functional
-    Fpath = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/F_' + str(np.round(mu, 0)) + '_' + str(np.round(omega, 4)) + '_' + str(counter) + '.jpg'
-    Fplot(F, get_norm(psig), path = Fpath)
+    Fpath = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/F_' + str(np.round(mu, 0)) + '_' + str(np.round(omega, 4)) + '_' + str(counter) + '.jpg' #set path where to save the plot of sGPE functional
+    Fplot(F, get_norm(psig), path = Fpath) #plot the sGPE functional
 
     print(counter)
     print(norm)
@@ -638,10 +656,7 @@ def NR2D(psig, mu, g, omega, epsilon,  counter = 0, maxcounter = 20):
     
     def callback(xk):
         residual = np.linalg.norm(b - A * xk) / np.linalg.norm(b)
-        print(residual)
-    
-    def callbackgmres(pr_norm): 
-        print(pr_norm)    
+        print(residual)  
         
     #result, info = gmres(A, b, rtol = .1, callback = callbackgmres, callback_type= 'pr_norm') #perform algorithm to solve linear equation
     result, info = lgmres(A, b, rtol = .09, callback = callback, maxiter = 10000) #perform algorithm to solve linear equation
@@ -656,8 +671,11 @@ def NR2D(psig, mu, g, omega, epsilon,  counter = 0, maxcounter = 20):
     
     deltapsi = deltapsir + 1.0j * deltapsii #compute deltapsi
     psinew = psig - deltapsi
+    
+    #below I included  a plotting routine for deltapsi, but currently unused
     '''
     #plot deltapsi
+    
     wf_title= r'$\Delta \Psi$ for Iteration: ' + str(counter + 1) 
     spectrum2d_title = '2D Spectrum for Iteration: ' + str(counter + 1)
     spectrum_title = 'Spectrum for Iteration: ' + str(counter + 1)

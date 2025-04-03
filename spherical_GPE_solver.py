@@ -1,37 +1,55 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import pyshtools as pysh
 import spherical_GPE_functions as sgpe
 import spherical_GPE_params as params
 import time
 import scienceplots
+import pyshtools as pysh
 
 #set some parameters for plotting
 
 plt.style.use('science')
-plt.rcParams.update({'font.size': 7})
-plt.rc('xtick', labelsize='x-small')
-plt.rc('ytick', labelsize='x-small')
+plt.rcParams.update({'font.size': 12})
+plt.rcParams.update({'xtick.labelsize': 10})
+plt.rcParams.update({'ytick.labelsize': 10})
+
 
 #initialize wavefunction
 
 
-
-#alpha = 100
-#m = 1
-#Vp = alpha * np.sin(params.theta_grid)**m * np.cos(m * params.phi_grid)
-
-
-#psi = np.loadtxt('J:/Uni - Physik/Master/Masterarbeit/Initial conditions/initial condition NR.txt', delimiter = ',', dtype = np.complex128)
+Rand = np.zeros((params.N, 2 * params.N), dtype = np.float64)
+Rand[0,:] = np.random.rand()
+Rand[1:,:] = np.random.rand(params.N - 1, 2 * params.N)
 
 
+#degrees = np.arange(256, dtype=float)
+#degrees[0] = 1
+#power = degrees**(-4)
+#clm = pysh.SHCoeffs.from_random(power, seed=12345)
+#clm_ortho = clm.convert(normalization='ortho')
+#coeffs = clm.to_array()
+#psi = pysh.expand.MakeGridDHC(coeffs, norm = 4, sampling = 2, extend = False)
+#psi = psi * np.sqrt(4 * np.pi * params.mu / params.g / sgpe.get_norm(psi))
 
-psi = np.sqrt(params.bg_dens) * sgpe.initial_magnitude(params.theta_grid, params.phi_grid, params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus, params.xi) * np.exp(1.0j * sgpe.phase(params.theta_grid, params.phi_grid, params.theta_plus, params.phi_plus, params.theta_minus, params.phi_minus))
-particle_number = sgpe.get_norm(psi)
 
 
-for _ in range(1000):
-    psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number, keep_phase = False)
+
+psi = np.sqrt(params.bg_dens) * np.exp(1j * 2 * np.pi * Rand)
+particlenumber = sgpe.get_norm2(psi)
+#RJ = psi[:, params.N//2: 3 * params.N // 2]
+#psi = np.loadtxt('./psi_f.txt', delimiter=',', dtype=np.complex128)
+#psi = np.concatenate((RJ, np.flip(RJ, axis = 1)), axis = 1)
+
+omega = 8
+#eta =  0.01 * np.max(np.abs(psi)) * np.exp(1j * 2 * np.pi * Rand) #noise term
+
+
+#timestep_multiplier_array = sgpe.timestep_multiplier(dt = params.dt, omega = params.omega)
+imaginary_timestep_multiplier_array = sgpe.imaginary_timestep_multiplier(dt = params.dt, omega = omega)
+
+
+#psi = psi + eta 
+
 
 
 #SIMULATION
@@ -39,13 +57,15 @@ for _ in range(1000):
 
 #after the first if statement follows the plotting routine to give a plot of the density and phase of the wave function and a plot of the spectrum
 
-conservative_number = 10#number of times you would like to record conserved quantities
-plot_number = 100 #number of times you would like to plot
-tracking_number = 20 #number of times you would like to track vortices
+conservative_number = 100#number of times you would like to record conserved quantities
+plot_number = 30 #number of times you would like to plot
+tracking_number = 100 #number of times you would like to track vortices
 
 t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of passed time in the simulation
 particle_number_t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of particle number as a function of time
-energy_t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of energy as a function of time
+ekin_t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of energy as a function of time
+eint_t = np.zeros(conservative_number + 1, dtype = np.float64)
+e0_t = np.zeros(conservative_number + 1, dtype = np.float64)
 angular_momentum_t = np.zeros(conservative_number + 1, dtype = np.float64) #initialize array of angular momentum as a function of time
 
 #initialize arrays for vortex tracking
@@ -58,18 +78,31 @@ conserved_tracking = False #True if you want to record conserved quantities
 
 timestamp = time.time() #measure the time, this will be used to create unique file names, that's all
 
+#coeffs_t = np.zeros((plot_number + 1, 2, params.lmax + 1, params.lmax + 1), dtype = np.complex128)
+
 for q in range(params.end + 1): 
     if (q % (params.end // plot_number) == 0):  #plot plot_number times during simulation, and
-        print('lstart: ', sgpe.lstart)
-        time = round(params.dt * q, 10) #time that has passed at this point in the simulation
+        #print('lstart: ', sgpe.lstart)
+        current_time = '%.1f' % round(params.dt * q, 4)  #time that has passed at this point in the simulation as a string
+        ekin, eint, erot = sgpe.get_energy(psi, params.g, omega)
+        print('Total energy: ', ekin + eint + erot - params.g * sgpe.get_norm(psi)**2 / (8 * np.pi))
+        print('Kinetic energy: ', ekin)
+        print('Interaction energy: ', eint)
+        print('Angular Momentum: ', sgpe.get_ang_momentum(psi))
+        print('E0: ', params.g * sgpe.get_norm(psi)**2 / (8 * np.pi), params.mu * sgpe.get_norm2(psi))
+        index = q // (params.end // plot_number)
+        
+        wf_title = r'$\tilde\omega = $ ' + str(omega)
+        wf_subtitle = r'$\tau = $ ' + current_time #+ r'$\frac{m R^2}{\hbar}$'
+        spectrum_title = r'Spectrum at $t = $ ' + current_time + r'$\frac{M R^2}{\hbar}$'
+        #wf_path = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Imaginary Time of Vortex Pole solution/wf_rp_' + str(omega) + '_' + str(index) + '.png'
+        #spectrum_path = './spectrum_' + str(int(round(timestamp, 0))) + '_' + current_time + '.pdf'
+        wf_path = ''
+        spectrum_path = ''
+        sgpe.plot(psi, wf_subtitle=wf_subtitle, wf_title = wf_title, spectrum_title = spectrum_title, wf_path = wf_path, ftype = 'png', dpi = 1200)
         
         
-        wf_title = r'Time evolution of two vortices at $t = $ ' + str(time) + r'$\frac{m R^2}{\hbar}$'
-        spectrum_title = r'Spectrum at $t = $ ' + str(time) + r'$\frac{m R^2}{\hbar}$'
-        wf_path = './wf_' + str(int(round(timestamp, 0))) + '_' + str(time) + '.pdf'
-        spectrum_path = './spectrum_' + str(int(round(timestamp, 0))) + '_' + str(time) + '.pdf'
-        sgpe.plot(psi, wf_title = wf_title, spectrum_title = spectrum_title)
-        
+        #coeffs_t[index, :, :, :] = pysh.expand.SHExpandDHC(psi, norm = 4, sampling = 2)
         
     if conserved_tracking:
         if (q % (params.end // conservative_number) == 0): #conservative_number times record the time, particle number, energy and angular momentum in the arrays initialized above (to plot the conserved quantities as function of time below)
@@ -77,7 +110,9 @@ for q in range(params.end + 1):
             t[index] = params.dt * q
             particle_number_t[index] = sgpe.get_norm(psi)
             ekin, eint, erot = sgpe.get_energy(psi, params.g, params.omega) 
-            energy_t[index] = ekin + eint + erot
+            ekin_t[index] = ekin 
+            eint_t[index] = eint
+            e0_t[index] = params.g * sgpe.get_norm(psi)**2 / (8 * np.pi)
             angular_momentum_t[index] = sgpe.get_ang_momentum(psi)
             
     if vortex_tracking:
@@ -108,28 +143,18 @@ for q in range(params.end + 1):
             vortex_tracker[3, index] = phi_v_minus
             
     
-    psi = sgpe.timestep_grid(psi, dt = params.dt, g =  params.g, omega = 0, mu = params.mu)
-    #tstop = 1e-2
-    #if (params.dt * q <= tstop):
-        #psi = psi * np.exp(-1.0j * Vp * (1 - params.dt * q / tstop) * params.dt)
-    
-  
-    
+    #psi = sgpe.timestep_grid(psi, dt = params.dt, g = params.g, mu = params.mu, multiplier_array = timestep_multiplier_array, filtering = False)
+    psi = sgpe.imaginary_timestep_grid(psi, dt = params.dt, g = params.g, particle_number = particlenumber, multiplier_array = imaginary_timestep_multiplier_array, keep_phase = False)
+
+
+np.savetxt('./psi_f.txt', psi, delimiter = ',') 
 
 #np.savetxt('./vortex_tracker_' + str(int(round(timestamp, 0))) + '.txt', vortex_tracker, delimiter = ',')
 #np.savetxt('./t_tracker_' + str(int(round(timestamp, 0))) + '.txt', t_tracker, delimiter = ',')
 #np.savetxt('./t_' + str(int(round(timestamp, 0))) + '.txt', t, delimiter = ',')
-#np.savetxt('./etot_' + str(int(round(timestamp, 0))) + '.txt', energy_t, delimiter = ',')
+#np.savetxt('./ekin_' + str(int(round(timestamp, 0))) + '.txt', ekin_t, delimiter = ',')
+#np.savetxt('./eint_' + str(int(round(timestamp, 0))) + '.txt', eint_t, delimiter = ',')
+#np.savetxt('./e0_' + str(int(round(timestamp, 0))) + '.txt', e0_t, delimiter = ',')
 #np.savetxt('./particle_number_' + str(int(round(timestamp, 0))) + '.txt', particle_number_t, delimiter = ',')
 #np.savetxt('./angular_momentum_' + str(int(round(timestamp, 0))) + '.txt', angular_momentum_t, delimiter = ',')
-
-
-
-
-
-
-
-
-
-
 

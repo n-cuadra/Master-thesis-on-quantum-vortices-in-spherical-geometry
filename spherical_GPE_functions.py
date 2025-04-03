@@ -626,8 +626,8 @@ def NR2D(psig, mu, g, omega, epsilon, Fpath = '', counter = 0, maxcounter = 20):
     F = Functional(psig, mu, g, omega) #compute Functional of psig
     F_coeffs = pysh.expand.SHExpandDHC(F, norm = 4, sampling = 2) #compute SH coeffs of functional
     norm = np.sqrt(np.sum(np.abs(F_coeffs)**2) / get_norm(psig)) #compute norm of functional
-    Fpath = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/F_' + str(np.round(mu, 0)) + '_' + str(np.round(omega, 4)) + '_' + str(counter) + '.jpg' #set path where to save the plot of sGPE functional
-    Fplot(F, get_norm(psig), path = Fpath) #plot the sGPE functional
+    #Fpath = 'E:/Uni - Physik/Master/Masterarbeit/Measurements/Simulations of two vortices/Stationary GPE/F_' + str(np.round(mu, 0)) + '_' + str(np.round(omega, 4)) + '_' + str(counter) + '.jpg' #set path where to save the plot of sGPE functional
+    Fplot(F, get_norm(psig))#, path = Fpath) #plot the sGPE functional
 
     print(counter)
     print(norm)

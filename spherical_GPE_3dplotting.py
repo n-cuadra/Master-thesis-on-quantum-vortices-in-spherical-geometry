@@ -11,18 +11,30 @@ from mpl_toolkits.mplot3d import Axes3D
 
 #set some parameters for plotting
 
+
+#set some parameters for plotting
+
 plt.style.use('science')
-plt.rcParams.update({'font.size': 9})
-plt.rc('xtick', labelsize='x-small')
-plt.rc('ytick', labelsize='x-small')
+plt.rcParams.update({'font.size': 12})
+plt.rcParams.update({'xtick.labelsize': 10})
+plt.rcParams.update({'ytick.labelsize': 10})
 
-cmap = cmocean.cm.thermal
 
-psi = np.loadtxt('J:/Uni - Physik/Master/Masterarbeit/Initial conditions/initial condition4.txt', delimiter = ',', dtype = np.complex128)
+
+#psi = np.loadtxt('J:/Uni - Physik/Master/Masterarbeit/Initial conditions/initial condition4.txt', delimiter = ',', dtype = np.complex128)
+
+psi = sgpe.IC_vortex_dipole(np.pi/4, np.pi, np.pi - np.pi/4, np.pi, params.xi, params.bg_dens)
+particle_number = sgpe.get_norm(psi)
+print(particle_number)
+
+for _ in range(500):
+    psi = sgpe.imaginary_timestep_grid(psi, params.dt, params.g, 0.0, particle_number, keep_phase = False)
+
+#%%
 density = np.abs(psi)**2
 phase = np.angle(psi)
 
-x, y, z = sgpe.sph2cart(params.theta_grid, params.phi_grid)
+x, y, z = sgpe.sph2cart(params.THETA, params.PHI)
 
 
 # Create a figure and a 3D axis
@@ -30,21 +42,30 @@ fig = plt.figure(figsize=(10, 8))
 ax = fig.add_subplot(111, projection='3d')
 
 
+fcolorsdens = (density - density.min())/(density.max() - density.min())
+colorsdens = cmocean.cm.thermal(fcolorsdens)
 
-fcolors = density
-fmax, fmin = fcolors.max(), fcolors.min()
-fcolors = (fcolors - fmin)/(fmax - fmin)
-colors = cmocean.cm.thermal(fcolors)
+
+fcolorsphase = (phase - phase.min())/(phase.max() - phase.min())
+colorsphase = cmocean.cm.balance(fcolorsphase)
 
 # Plot the surface
-surf = ax.plot_surface(x, y, z, facecolors=colors, rstride=1, cstride=1, antialiased=True, cmap = cmap)
+surf = ax.plot_surface(x, y, z, facecolors=colorsdens, rstride=1, cstride=1, antialiased=True, cmap = cmocean.cm.thermal)
+#surf = ax.plot_surface(x, y, z, facecolors=colorsphase, rstride=1, cstride=1, antialiased=True, cmap = cmocean.cm.balance)
 
 # Add color bar
-mappable = plt.cm.ScalarMappable(cmap=cmap)
+mappable = plt.cm.ScalarMappable(cmap=cmocean.cm.thermal)
+#mappable = plt.cm.ScalarMappable(cmap=cmocean.cm.balance)
 mappable.set_array(density)
-cbar = plt.colorbar(mappable, ax=ax, shrink=0.4, aspect=15, pad = 0.001, label = 'Density', location = 'bottom', anchor = (0.5, 2.0))
+#mappable.set_array(phase)
+cbar = plt.colorbar(mappable, ax=ax, shrink=0.4, aspect=15, pad = 0.001, location = 'bottom', anchor = (0.5, 2.0))
+
+cbar.ax.set_xlabel(r'$n$ $\left[1/R^2\right]$', fontsize=16)
+#cbar.ax.set_xlabel(r'Phase', fontsize=16)
 #cbar.mappable.set_clim(-np.pi, np.pi)
 #cbar.ax.set_xticks(ticks = [-np.pi, 0, np.pi], labels = [r'$-\pi$', 0, r'$+\pi$'])
+cbar.ax.tick_params(labelsize=14)
+
 
 # Set labels and title
 ax.set_xlabel('x')
@@ -82,5 +103,5 @@ ax.set_box_aspect(None, zoom=0.8)
 plt.show()
 
 # Save the plot as a PDF
-fig.savefig('J:/Uni - Physik/Master/Masterarbeit/density3dplot.png', dpi=300, bbox_inches = 'tight', format = 'png', transparent = True)
+fig.savefig('./density3dplot_example.png', dpi=300, bbox_inches = 'tight', format = 'png', transparent = True)
 
